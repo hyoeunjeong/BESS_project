@@ -1,0 +1,19 @@
+﻿# Environment
+.env
+realtime_data/
+*.db
+**/data/api_cache/
+DL_LSTM/data/
+rule_based/data/
+**/models/saved/
+*.pt
+*.pkl
+**/results/
+comparison_results/
+*.png
+__pycache__/
+*.pyc
+venv/
+data/
+data/
+data/
