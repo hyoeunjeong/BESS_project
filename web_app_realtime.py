@@ -336,6 +336,11 @@ def dashboard():
     return DASHBOARD_HTML
 
 
+@app.route('/mobile')
+def dashboard_mobile():
+    return MOBILE_HTML
+
+
 @app.route('/api/status')
 def api_status():
     data = get_latest_data()
@@ -2019,6 +2024,1235 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+# =====================================================================
+# 모바일/Pi4 7인치용 HTML (4페이지 구성)
+# =====================================================================
+MOBILE_HTML = """<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BESS 실시간 모니터링</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #fff;
+        }
+        .wrapper { 
+            display: flex; flex-direction: column; 
+            width: 100%; height: 100vh; 
+            padding: 8px; gap: 8px; 
+        }
+        
+        /* 헤더 */
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(15, 23, 42, 0.8); border: 1px solid #334155;
+            border-radius: 8px; padding: 8px 14px; flex-shrink: 0;
+        }
+        .header h1 { font-size: 1.1em; font-weight: 700; }
+        .time { font-size: 0.9em; color: #94a3b8; }
+        .status-indicator {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #10b981; animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        /* 페이지 컨테이너 */
+        .page-container { 
+            flex: 1; 
+            overflow: hidden; 
+            position: relative;
+            min-height: 0;
+        }
+        .page {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: none;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .page.active { display: flex; }
+        
+        /* 카드 그리드 (페이지 1, 2) */
+        .cards-grid {
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(2, 1fr); 
+            gap: 8px;
+            flex: 1;
+            min-height: 0;
+        }
+        .card {
+            background: rgba(30, 41, 59, 0.7); border: 1px solid #334155;
+            border-radius: 10px; padding: 10px;
+            display: flex; flex-direction: column; 
+            justify-content: center; align-items: center;
+            transition: all 0.3s ease; min-height: 0; 
+            cursor: pointer;
+        }
+        .card:active { background: rgba(30, 41, 59, 0.9); }
+        .card.charging { border-color: #3b82f6; box-shadow: 0 0 15px rgba(59, 130, 246, 0.3); }
+        .card.discharging { border-color: #10b981; box-shadow: 0 0 15px rgba(16, 185, 129, 0.3); }
+        .metric-label { font-size: 0.75em; color: #94a3b8; margin-bottom: 4px; font-weight: 500; text-align: center; }
+        .metric-value { font-size: 1.5em; font-weight: bold; line-height: 1; }
+        .metric-unit { font-size: 0.65em; color: #64748b; margin-top: 2px; }
+        .sub-metric { font-size: 0.6em; margin-top: 3px; color: #94a3b8; text-align: center; }
+        
+        /* 게이지 */
+        .gauge-container { position: relative; width: 70px; height: 70px; }
+        .gauge {
+            width: 100%; height: 100%; border-radius: 50%;
+            background: conic-gradient(#10b981 0deg 90deg, #f59e0b 90deg 270deg, #ef4444 270deg 360deg);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .gauge-inner {
+            width: 62px; height: 62px; border-radius: 50%; background: #1e293b;
+            display: flex; align-items: center; justify-content: center; flex-direction: column;
+        }
+        .gauge-value { font-size: 1.2em; font-weight: bold; }
+        .gauge-percent { font-size: 0.55em; color: #94a3b8; }
+        
+        /* 차트 페이지 (페이지 3, 4) */
+        .full-chart-section {
+            flex: 1;
+            background: rgba(30, 41, 59, 0.7); border: 1px solid #334155;
+            border-radius: 10px; padding: 10px;
+            display: flex; flex-direction: column; 
+            overflow: hidden; min-height: 0;
+        }
+        .section-title { 
+            font-size: 0.95em; 
+            font-weight: 600; 
+            margin-bottom: 8px; 
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .detail-btn {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            color: #3b82f6;
+            padding: 3px 10px;
+            border-radius: 5px;
+            font-size: 0.7em;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .detail-btn:active {
+            background: rgba(59, 130, 246, 0.3);
+        }
+        
+        .chart-container { position: relative; flex: 1; min-height: 0; }
+        .comparison-table { flex: 1; overflow-y: auto; font-size: 0.75em; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.75em; }
+        th, td { padding: 5px 3px; text-align: center; border-bottom: 0.5px solid #334155; color: #94a3b8; }
+        th { background: rgba(51, 65, 85, 0.3); color: #cbd5e1; font-weight: 600; position: sticky; top: 0; z-index: 10; }
+        td { color: #e2e8f0; }
+        .metric-name { text-align: left; color: #94a3b8; font-weight: 500; }
+        .lstm { color: #3b82f6; }
+        .rb { color: #10b981; }
+        .better { color: #10b981; font-weight: 600; }
+        .hour-row { background: rgba(59, 130, 246, 0.1); }
+        .hour-cell { font-weight: 600; color: #cbd5e1; }
+        
+        /* 네비게이션 바 (페이지 표시 + 화살표) */
+        .nav-bar {
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            background: rgba(15, 23, 42, 0.8); border: 1px solid #334155;
+            border-radius: 8px; padding: 8px 14px; 
+            flex-shrink: 0;
+        }
+        .btn {
+            background: rgba(59, 130, 246, 0.8); border: 1px solid #3b82f6;
+            color: white; border-radius: 6px; 
+            padding: 6px 12px; font-size: 1em;
+            cursor: pointer; transition: all 0.2s ease;
+            min-width: 36px; height: 36px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        
+        .page-info { 
+            display: flex; 
+            align-items: center; 
+            gap: 12px; 
+            flex-direction: column;
+        }
+        .page-text { 
+            color: #cbd5e1; 
+            font-size: 0.85em; 
+            font-weight: 500;
+        }
+        .page-text .current { color: #3b82f6; font-weight: 700; font-size: 1.1em; }
+        .dots { display: flex; gap: 8px; }
+        .dot { 
+            width: 8px; height: 8px; border-radius: 50%; 
+            background: rgba(148, 163, 184, 0.4); 
+            cursor: pointer; 
+            transition: all 0.3s ease; 
+        }
+        .dot.active { 
+            background: #3b82f6; 
+            width: 24px; 
+            border-radius: 4px; 
+        }
+        .page-label {
+            color: #94a3b8;
+            font-size: 0.7em;
+            margin-top: 2px;
+        }
+
+        /* ======= 모달 (PC 버전과 동일) ======= */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none; align-items: center; justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid #475569;
+            border-radius: 14px;
+            padding: 16px;
+            width: 95%;
+            max-width: 1100px;
+            max-height: 92vh;
+            overflow: auto;
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.5);
+        }
+        .modal::-webkit-scrollbar { width: 10px; }
+        .modal::-webkit-scrollbar-track { background: transparent; }
+        .modal::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+            border-radius: 999px;
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #334155;
+        }
+        .modal-title { font-size: 1.1em; font-weight: 700; color: #fff; }
+        .modal-subtitle { font-size: 0.75em; color: #94a3b8; margin-top: 3px; }
+        .close-btn {
+            background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444;
+            color: #ef4444; width: 36px; height: 36px; border-radius: 8px;
+            font-size: 1em; cursor: pointer; font-weight: bold;
+        }
+        .close-btn:active { background: rgba(239, 68, 68, 0.4); }
+        .modal-chart-container { 
+            position: relative; 
+            height: 280px; 
+            width: 100%;
+            margin-bottom: 12px; 
+        }
+        .modal-chart-container.large { height: 320px; }
+        .modal-chart-container canvas { max-width: 100% !important; }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .stat-card {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+        }
+        .stat-label { font-size: 0.65em; color: #94a3b8; margin-bottom: 3px; }
+        .stat-value { font-size: 1.1em; font-weight: bold; color: #3b82f6; }
+        .stat-unit { font-size: 0.55em; color: #94a3b8; font-weight: normal; margin-left: 2px; }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75em;
+        }
+        .data-table th {
+            background: rgba(59, 130, 246, 0.2);
+            color: #cbd5e1;
+            padding: 6px;
+            text-align: center;
+            border-bottom: 1px solid #334155;
+        }
+        .data-table td {
+            padding: 6px;
+            text-align: center;
+            border-bottom: 0.5px solid #334155;
+            color: #e2e8f0;
+        }
+        
+        .info-box {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 3px solid #3b82f6;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            color: #cbd5e1;
+        }
+        .comparison-chart-title {
+            font-size: 0.75em;
+            color: #cbd5e1;
+            font-weight: 600;
+            margin-bottom: 6px;
+            padding: 0 5px;
+        }
+        
+        /* 시간 범위 슬라이더 (전력흐름 모달) */
+        .time-range-control {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }
+        .range-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .range-title { font-size: 0.75em; color: #cbd5e1; font-weight: 500; }
+        .range-label { font-size: 0.75em; color: #64748b; font-weight: 600; }
+        .slider-wrapper {
+            position: relative;
+            height: 26px;
+            margin: 8px 0;
+        }
+        .slider-track {
+            position: absolute;
+            top: 50%;
+            left: 0; right: 0;
+            height: 5px;
+            background: #1e293b;
+            border-radius: 3px;
+            transform: translateY(-50%);
+        }
+        .slider-range-active {
+            position: absolute;
+            top: 50%;
+            height: 5px;
+            background: linear-gradient(90deg, #64748b, #475569);
+            border-radius: 3px;
+            transform: translateY(-50%);
+        }
+        .slider-input {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 26px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            pointer-events: none;
+            outline: none;
+        }
+        .slider-input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            background: #94a3b8;
+            border-radius: 50%;
+            cursor: pointer;
+            pointer-events: all;
+            border: 2px solid #fff;
+        }
+        .quick-buttons {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .quick-btn {
+            background: rgba(100, 116, 139, 0.2);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #cbd5e1;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 0.65em;
+            cursor: pointer;
+        }
+        .quick-btn.active {
+            background: rgba(59, 130, 246, 0.3);
+            border-color: #3b82f6;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <!-- 헤더 -->
+        <div class="header">
+            <h1>BESS 실시간 모니터링</h1>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <span class="time" id="current-time">--:--:--</span>
+                <span class="status-indicator"></span>
+            </div>
+        </div>
+
+        <!-- 페이지 컨테이너 (4페이지) -->
+        <div class="page-container">
+            <!-- 페이지 1: 카드 1-6 -->
+            <div class="page active" id="page-1">
+                <div class="cards-grid" id="cards-grid-1"></div>
+            </div>
+            
+            <!-- 페이지 2: 카드 7-12 -->
+            <div class="page" id="page-2">
+                <div class="cards-grid" id="cards-grid-2"></div>
+            </div>
+            
+            <!-- 페이지 3: 실시간 전력 흐름 차트 -->
+            <div class="page" id="page-3">
+                <div class="full-chart-section">
+                    <div class="section-title">
+                        <span>실시간 전력 흐름</span>
+                        <button class="detail-btn" onclick="openPowerFlowModal()">상세 보기 ↗</button>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="powerChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 페이지 4: Rule-Based vs LSTM 비교 -->
+            <div class="page" id="page-4">
+                <div class="full-chart-section">
+                    <div class="section-title">
+                        <span>Rule-Based vs LSTM 비교</span>
+                        <button class="detail-btn" onclick="openComparisonModal()">상세 보기 ↗</button>
+                    </div>
+                    <div class="comparison-table" id="comparison-table">
+                        <p style="text-align: center; color: #64748b; padding: 20px;">데이터 수집 중...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 네비게이션 바 -->
+        <div class="nav-bar">
+            <button class="btn" id="prev-btn" onclick="prevPage()">&lt;</button>
+            <div class="page-info">
+                <span class="page-text"><span class="current" id="page-num">1</span>/4 - <span id="page-label">상태 1</span></span>
+                <div class="dots">
+                    <div class="dot active" onclick="goToPage(1)"></div>
+                    <div class="dot" onclick="goToPage(2)"></div>
+                    <div class="dot" onclick="goToPage(3)"></div>
+                    <div class="dot" onclick="goToPage(4)"></div>
+                </div>
+            </div>
+            <button class="btn" id="next-btn" onclick="nextPage()">&gt;</button>
+        </div>
+    </div>
+
+    <!-- 박스 모달 -->
+    <div class="modal-overlay" id="modal" onclick="closeModalOnOverlay(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title" id="modal-title">제목</div>
+                    <div class="modal-subtitle" id="modal-subtitle">수집된 일별 데이터</div>
+                </div>
+                <button class="close-btn" onclick="closeModal()">X</button>
+            </div>
+            <div class="info-box" id="modal-info">수집된 데이터를 표시합니다.</div>
+            <div class="stats-grid" id="modal-stats"></div>
+            <div class="modal-chart-container">
+                <canvas id="modalChart"></canvas>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>날짜</th>
+                        <th>요일</th>
+                        <th id="modal-col-1">값</th>
+                        <th id="modal-col-2">평균</th>
+                        <th id="modal-col-3">기타</th>
+                        <th>데이터 수</th>
+                    </tr>
+                </thead>
+                <tbody id="modal-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 실시간 전력흐름 모달 -->
+    <div class="modal-overlay" id="powerflow-modal" onclick="closePowerFlowModalOnOverlay(event)">
+        <div class="modal" id="powerflow-modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">일일 전력 흐름 상세</div>
+                    <div class="modal-subtitle">오늘 하루 30분 단위 데이터</div>
+                </div>
+                <button class="close-btn" onclick="closePowerFlowModal()">X</button>
+            </div>
+            <div class="info-box">시간대별 부하, 태양광, BESS, 계통 전력 흐름을 보여줍니다.</div>
+            <div class="stats-grid" id="powerflow-stats"></div>
+            <div class="modal-chart-container large">
+                <canvas id="powerFlowDetailChart"></canvas>
+            </div>
+            <div class="time-range-control">
+                <div class="range-header">
+                    <span class="range-title">표시 시간 범위</span>
+                    <span class="range-label" id="powerflow-range-label">00:00 ~ 23:30</span>
+                </div>
+                <div class="slider-wrapper">
+                    <div class="slider-track"></div>
+                    <div class="slider-range-active" id="powerflow-active-range" style="left: 0%; right: 0%;"></div>
+                    <input type="range" class="slider-input" id="powerflow-slider-start" min="0" max="47" value="0">
+                    <input type="range" class="slider-input" id="powerflow-slider-end" min="0" max="47" value="47">
+                </div>
+                <div class="quick-buttons">
+                    <button class="quick-btn" data-start="0" data-end="11">새벽 (00-06)</button>
+                    <button class="quick-btn" data-start="12" data-end="23">오전 (06-12)</button>
+                    <button class="quick-btn" data-start="24" data-end="35">오후 (12-18)</button>
+                    <button class="quick-btn" data-start="36" data-end="47">저녁 (18-24)</button>
+                    <button class="quick-btn active" data-start="0" data-end="47">하루 전체</button>
+                </div>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>시각</th>
+                        <th>부하</th>
+                        <th>태양광</th>
+                        <th>BESS</th>
+                        <th>계통</th>
+                        <th>SOC</th>
+                        <th>샘플</th>
+                    </tr>
+                </thead>
+                <tbody id="powerflow-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Rule-Based vs LSTM 비교 모달 -->
+    <div class="modal-overlay" id="comparison-modal" onclick="closeComparisonModalOnOverlay(event)">
+        <div class="modal" id="comparison-modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">Rule-Based vs LSTM 성능 비교</div>
+                    <div class="modal-subtitle">시간별 성능 추이 및 종합 분석</div>
+                </div>
+                <button class="close-btn" onclick="closeComparisonModal()">X</button>
+            </div>
+            <div class="stats-grid" id="comparison-summary-stats"></div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                <div class="modal-chart-container" style="height: 170px;">
+                    <div class="comparison-chart-title">자립률 추이 (%)</div>
+                    <canvas id="comparisonSelfSuffChart"></canvas>
+                </div>
+                <div class="modal-chart-container" style="height: 170px;">
+                    <div class="comparison-chart-title">SOC 추이 (%)</div>
+                    <canvas id="comparisonSocChart"></canvas>
+                </div>
+                <div class="modal-chart-container" style="height: 170px;">
+                    <div class="comparison-chart-title">배터리 사이클 (회)</div>
+                    <canvas id="comparisonCycleChart"></canvas>
+                </div>
+                <div class="modal-chart-container" style="height: 170px;">
+                    <div class="comparison-chart-title">절감액 (원)</div>
+                    <canvas id="comparisonSavingChart"></canvas>
+                </div>
+            </div>
+            <div class="info-box">시간별 LSTM과 Rule-Based 성능 비교. 더 좋은 값은 초록색.</div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>시간</th>
+                        <th>지표</th>
+                        <th style="color: #3b82f6;">LSTM</th>
+                        <th style="color: #10b981;">Rule-Based</th>
+                        <th>차이</th>
+                        <th>우위</th>
+                    </tr>
+                </thead>
+                <tbody id="comparison-modal-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let chart = null;
+        let modalChart = null;
+        let powerFlowDetailChart = null;
+        let comparisonCharts = { selfSuff: null, soc: null, cycle: null, saving: null };
+        let currentPage = 1;
+        const TOTAL_PAGES = 4;
+        let powerFlowAllData = [];
+
+        const PAGE_LABELS = {
+            1: '상태 1',
+            2: '상태 2',
+            3: '실시간 전력 흐름',
+            4: 'Rule-Based vs LSTM',
+        };
+
+        const allCards = [
+            { title: '배터리 상태', value_id: 'soc-value', unit: '%', type: 'gauge',
+              metric: 'avg_soc', label: '평균 SOC', col1: 'SOC(%)', col2: '평균', col3: '범위' },
+            { title: 'BESS 출력', value_id: 'bess-power', unit: 'kW', type: 'metric', sub_id: 'bess-action',
+              metric: 'avg_bess', label: 'BESS 평균 출력', col1: '평균(kW)', col2: '충전(kWh)', col3: '방전(kWh)' },
+            { title: '현재 요금', value_id: 'tariff-rate', unit: '원/kWh', type: 'metric', sub_id: 'tariff-period',
+              metric: 'avg_tariff', label: '평균 요금', col1: '평균(원)', col2: '소비(kWh)', col3: '비용(원)' },
+            { title: '시스템 부하', value_id: 'load-kw', unit: 'kW', type: 'metric', sub_id: 'solar-info',
+              metric: 'avg_load', label: '평균 부하', col1: '평균(kW)', col2: '총량(kWh)', col3: '태양광(kWh)' },
+            { title: '자립률', value_id: 'self-sufficiency', unit: '%', type: 'metric', sub: '오늘의 자급률',
+              metric: 'self_sufficiency_pct', label: '자립률', col1: '자립률(%)', col2: '부하(kWh)', col3: '공급(kWh)' },
+            { title: '일일 절감액', value_id: 'daily-saving', unit: '원', type: 'metric', sub_id: 'discharge-info',
+              metric: 'daily_saving_won', label: '일일 절감액', col1: '절감액(원)', col2: '방전(kWh)', col3: '누적(원)' },
+            { title: '배터리 사이클', value_id: 'cycle-count', unit: '회', type: 'metric', sub: '누적 사이클',
+              metric: 'cycle', label: '사이클 수', col1: '사이클', col2: '충전(kWh)', col3: '방전(kWh)' },
+            { title: '금일 충전량', value_id: 'charge-kwh', unit: 'kWh', type: 'metric', sub: '배터리 충전',
+              metric: 'sum_charge_kwh', label: '일일 충전량', col1: '충전(kWh)', col2: '평균(kW)', col3: '시간(h)' },
+            { title: '금일 방전량', value_id: 'total-discharge-kwh', unit: 'kWh', type: 'metric', sub: '배터리 방전',
+              metric: 'sum_discharge_kwh', label: '일일 방전량', col1: '방전(kWh)', col2: '평균(kW)', col3: '시간(h)' },
+            { title: '역송전량', value_id: 'reverse-power', unit: 'kWh', type: 'metric', sub: '계통 공급',
+              metric: 'reverse_kwh', label: '역송전량', col1: '역송(kWh)', col2: '태양광(kWh)', col3: '비율(%)' },
+            { title: '계통 전력', value_id: 'grid-power', unit: 'kW', type: 'metric', sub_id: 'grid-status',
+              metric: 'avg_grid', label: '계통 전력', col1: '평균(kW)', col2: '구매(kWh)', col3: '판매(kWh)' },
+            { title: '금일 소비', value_id: 'total-load', unit: 'kWh', type: 'metric', sub: '오늘 총 부하',
+              metric: 'sum_load_kwh', label: '일일 소비', col1: '소비(kWh)', col2: '평균(kW)', col3: '피크(kW)' },
+        ];
+
+        function renderCards(pageNum) {
+            const gridId = pageNum === 1 ? 'cards-grid-1' : 'cards-grid-2';
+            const grid = document.getElementById(gridId);
+            if (!grid) return;
+            grid.innerHTML = '';
+            const start = (pageNum - 1) * 6;
+            const cards = allCards.slice(start, start + 6);
+            
+            cards.forEach((c, idx) => {
+                const el = document.createElement('div');
+                el.className = 'card';
+                el.id = c.value_id + '-card';
+                el.onclick = () => openModal(start + idx);
+                
+                if (c.type === 'gauge') {
+                    el.innerHTML = `<div class="metric-label">${c.title}</div>
+                        <div class="gauge-container"><div class="gauge"><div class="gauge-inner">
+                        <div class="gauge-value" id="${c.value_id}">--</div>
+                        <div class="gauge-percent">${c.unit}</div></div></div></div>`;
+                } else {
+                    let sub = c.sub_id ? `<div class="sub-metric" id="${c.sub_id}">-</div>` : `<div class="sub-metric">${c.sub}</div>`;
+                    el.innerHTML = `<div class="metric-label">${c.title}</div>
+                        <div class="metric-value" id="${c.value_id}">0.0</div>
+                        <div class="metric-unit">${c.unit}</div>${sub}`;
+                }
+                grid.appendChild(el);
+            });
+        }
+
+        function updateTime() {
+            document.getElementById('current-time').textContent = new Date().toLocaleTimeString('ko-KR');
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        function showPage(p) {
+            if (p < 1 || p > TOTAL_PAGES) return;
+            currentPage = p;
+            
+            // 모든 페이지 숨기기
+            for (let i = 1; i <= TOTAL_PAGES; i++) {
+                const page = document.getElementById('page-' + i);
+                if (page) page.classList.remove('active');
+            }
+            
+            // 현재 페이지 표시
+            const activePage = document.getElementById('page-' + p);
+            if (activePage) activePage.classList.add('active');
+            
+            // 페이지 표시 텍스트 업데이트
+            document.getElementById('page-num').textContent = p;
+            document.getElementById('page-label').textContent = PAGE_LABELS[p];
+            
+            // dot 업데이트
+            document.querySelectorAll('.dot').forEach((d, i) => 
+                d.classList.toggle('active', i === p - 1));
+            
+            // 이전/다음 버튼 활성화
+            document.getElementById('prev-btn').disabled = (p === 1);
+            document.getElementById('next-btn').disabled = (p === TOTAL_PAGES);
+            
+            // 페이지별 초기화
+            if (p === 1) renderCards(1);
+            if (p === 2) renderCards(2);
+            if (p === 3) {
+                if (!chart) initChart();
+                updateChart();
+            }
+            if (p === 4) updateComparison();
+        }
+        function nextPage() { if (currentPage < TOTAL_PAGES) showPage(currentPage + 1); }
+        function prevPage() { if (currentPage > 1) showPage(currentPage - 1); }
+        function goToPage(p) { showPage(p); }
+
+        // ============ 박스 모달 ============
+        function openModal(cardIdx) {
+            const card = allCards[cardIdx];
+            document.getElementById('modal-title').textContent = `${card.title} - 일별 분석`;
+            document.getElementById('modal-col-1').textContent = card.col1;
+            document.getElementById('modal-col-2').textContent = card.col2;
+            document.getElementById('modal-col-3').textContent = card.col3;
+            
+            document.getElementById('modal').classList.add('active');
+            
+            fetch('/api/weekly').then(r => r.json()).then(res => {
+                const data = res.data || [];
+                if (data.length === 0) {
+                    document.getElementById('modal-info').innerHTML = '<strong>아직 데이터가 수집되지 않았습니다.</strong>';
+                    document.getElementById('modal-stats').innerHTML = '';
+                    document.getElementById('modal-tbody').innerHTML = '';
+                    if (modalChart) { modalChart.destroy(); modalChart = null; }
+                } else {
+                    document.getElementById('modal-info').textContent = `수집된 ${data.length}일치 데이터를 표시합니다.`;
+                    renderModalStats(data, card);
+                    renderModalTable(data, card);
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            setTimeout(() => {
+                                renderModalChart(data, card);
+                                if (modalChart) modalChart.resize();
+                            }, 200);
+                        });
+                    });
+                }
+            });
+        }
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+            if (modalChart) { modalChart.destroy(); modalChart = null; }
+        }
+        function closeModalOnOverlay(e) { if (e.target.id === 'modal') closeModal(); }
+
+        function getMetricUnit(metric) {
+            const unitMap = {
+                'avg_soc': '%', 'avg_bess': 'kW', 'avg_tariff': '원/kWh',
+                'avg_load': 'kW', 'self_sufficiency_pct': '%', 'daily_saving_won': '원',
+                'cycle': '회', 'sum_charge_kwh': 'kWh', 'sum_discharge_kwh': 'kWh',
+                'reverse_kwh': 'kWh', 'avg_grid': 'kW', 'sum_load_kwh': 'kWh',
+            };
+            return unitMap[metric] || '';
+        }
+        
+        function renderModalStats(data, card) {
+            const values = data.map(d => parseFloat(d[card.metric] || 0));
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            const max = Math.max(...values);
+            const min = Math.min(...values);
+            const total = values.reduce((a, b) => a + b, 0);
+            const unit = getMetricUnit(card.metric);
+            const isWon = unit === '원';
+            const fmt = (v) => isWon ? Math.round(v).toLocaleString() : v.toFixed(2);
+            
+            document.getElementById('modal-stats').innerHTML = `
+                <div class="stat-card"><div class="stat-label">평균</div><div class="stat-value">${fmt(avg)} <span class="stat-unit">${unit}</span></div></div>
+                <div class="stat-card"><div class="stat-label">최대</div><div class="stat-value">${fmt(max)} <span class="stat-unit">${unit}</span></div></div>
+                <div class="stat-card"><div class="stat-label">최소</div><div class="stat-value">${fmt(min)} <span class="stat-unit">${unit}</span></div></div>
+                <div class="stat-card"><div class="stat-label">합계</div><div class="stat-value">${fmt(total)} <span class="stat-unit">${unit}</span></div></div>
+            `;
+        }
+
+        function renderModalChart(data, card) {
+            const ctx = document.getElementById('modalChart').getContext('2d');
+            if (modalChart) modalChart.destroy();
+            const labels = data.map(d => {
+                const dt = new Date(d.date);
+                return `${dt.getMonth()+1}/${dt.getDate()}`;
+            });
+            const values = data.map(d => parseFloat(d[card.metric] || 0));
+            modalChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{
+                    label: card.label, data: values,
+                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                    borderColor: '#3b82f6', borderWidth: 2,
+                }]},
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#e2e8f0' } } },
+                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
+                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } } }
+                }
+            });
+        }
+
+        function renderModalTable(data, card) {
+            const tbody = document.getElementById('modal-tbody');
+            tbody.innerHTML = '';
+            const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+            data.forEach(d => {
+                const dt = new Date(d.date);
+                const dayName = dayNames[dt.getDay()];
+                let col1, col2, col3;
+                if (card.metric === 'avg_soc') {
+                    col1 = d.avg_soc; col2 = d.avg_soc;
+                    col3 = `${(d.avg_soc - 10).toFixed(1)}~${(d.avg_soc + 10).toFixed(1)}`;
+                } else if (card.metric === 'avg_bess') {
+                    col1 = d.avg_bess.toFixed(2); col2 = d.sum_charge_kwh; col3 = d.sum_discharge_kwh;
+                } else if (card.metric === 'avg_tariff') {
+                    col1 = d.avg_tariff.toFixed(0); col2 = d.sum_load_kwh;
+                    col3 = (d.sum_load_kwh * d.avg_tariff).toFixed(0);
+                } else if (card.metric === 'avg_load') {
+                    col1 = d.avg_load.toFixed(2); col2 = d.sum_load_kwh; col3 = d.sum_solar_kwh;
+                } else if (card.metric === 'self_sufficiency_pct') {
+                    col1 = d.self_sufficiency_pct; col2 = d.sum_load_kwh;
+                    col3 = (d.sum_solar_kwh + d.sum_discharge_kwh).toFixed(2);
+                } else if (card.metric === 'daily_saving_won') {
+                    col1 = d.daily_saving_won.toLocaleString(); col2 = d.sum_discharge_kwh; col3 = '-';
+                } else if (card.metric === 'cycle') {
+                    col1 = d.cycle; col2 = d.sum_charge_kwh; col3 = d.sum_discharge_kwh;
+                } else if (card.metric === 'sum_charge_kwh') {
+                    col1 = d.sum_charge_kwh; col2 = d.avg_bess.toFixed(2);
+                    col3 = (d.sum_charge_kwh / Math.max(d.avg_bess, 0.01)).toFixed(1);
+                } else if (card.metric === 'sum_discharge_kwh') {
+                    col1 = d.sum_discharge_kwh; col2 = d.avg_bess.toFixed(2);
+                    col3 = (d.sum_discharge_kwh / Math.max(Math.abs(d.avg_bess), 0.01)).toFixed(1);
+                } else if (card.metric === 'reverse_kwh') {
+                    col1 = d.reverse_kwh; col2 = d.sum_solar_kwh;
+                    col3 = ((d.reverse_kwh / Math.max(d.sum_solar_kwh, 0.01)) * 100).toFixed(1);
+                } else if (card.metric === 'avg_grid') {
+                    col1 = d.avg_grid.toFixed(2);
+                    col2 = (d.avg_grid > 0 ? d.sum_load_kwh : 0).toFixed(2);
+                    col3 = (d.avg_grid < 0 ? Math.abs(d.sum_load_kwh) : 0).toFixed(2);
+                } else if (card.metric === 'sum_load_kwh') {
+                    col1 = d.sum_load_kwh; col2 = d.avg_load.toFixed(2); col3 = (d.avg_load * 1.5).toFixed(2);
+                } else {
+                    col1 = d[card.metric] || 0; col2 = '-'; col3 = '-';
+                }
+                tbody.innerHTML += `<tr><td>${d.date}</td><td>${dayName}요일</td><td>${col1}</td><td>${col2}</td><td>${col3}</td><td>${d.data_count}</td></tr>`;
+            });
+        }
+
+        // ============ 실시간 전력흐름 모달 ============
+        function openPowerFlowModal() {
+            document.getElementById('powerflow-modal').classList.add('active');
+            const modalContent = document.getElementById('powerflow-modal-content');
+            modalContent.scrollTop = 0;
+            
+            if (!modalContent.dataset.sliderListenerAdded) {
+                setupPowerflowSlider();
+                modalContent.dataset.sliderListenerAdded = 'true';
+            }
+            
+            fetch('/api/daily-detailed').then(r => r.json()).then(res => {
+                const data = res.data || [];
+                powerFlowAllData = data;
+                document.getElementById('powerflow-slider-start').value = 0;
+                document.getElementById('powerflow-slider-end').value = 47;
+                document.querySelectorAll('#powerflow-modal .quick-btn').forEach(b => b.classList.remove('active'));
+                document.querySelector('#powerflow-modal .quick-btn[data-start="0"][data-end="47"]').classList.add('active');
+                renderPowerFlowStats(data);
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            updatePowerflowRange(0, 47);
+                            if (powerFlowDetailChart) powerFlowDetailChart.resize();
+                        }, 200);
+                    });
+                });
+            });
+        }
+        
+        function indexToTimeLabel(idx) {
+            const hour = Math.floor(idx / 2);
+            const min = (idx % 2) * 30;
+            return `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+        }
+        function timeLabelToIndex(timeLabel) {
+            const [h, m] = timeLabel.split(':').map(Number);
+            return h * 2 + Math.floor(m / 30);
+        }
+        
+        function updatePowerflowRange(startIdx, endIdx) {
+            if (startIdx > endIdx) { const tmp = startIdx; startIdx = endIdx; endIdx = tmp; }
+            const startLabel = indexToTimeLabel(startIdx);
+            const endLabel = indexToTimeLabel(endIdx);
+            document.getElementById('powerflow-range-label').textContent = `${startLabel} ~ ${endLabel}`;
+            const startPct = (startIdx / 47) * 100;
+            const endPct = (endIdx / 47) * 100;
+            document.getElementById('powerflow-active-range').style.left = startPct + '%';
+            document.getElementById('powerflow-active-range').style.right = (100 - endPct) + '%';
+            const filteredData = powerFlowAllData.filter(d => {
+                const idx = timeLabelToIndex(d.hour);
+                return idx >= startIdx && idx <= endIdx;
+            });
+            renderPowerFlowDetailChart(filteredData);
+            renderPowerFlowTable(filteredData);
+        }
+        
+        function setupPowerflowSlider() {
+            const sliderStart = document.getElementById('powerflow-slider-start');
+            const sliderEnd = document.getElementById('powerflow-slider-end');
+            const update = () => {
+                const s = parseInt(sliderStart.value);
+                const e = parseInt(sliderEnd.value);
+                updatePowerflowRange(s, e);
+                document.querySelectorAll('#powerflow-modal .quick-btn').forEach(b => b.classList.remove('active'));
+            };
+            sliderStart.addEventListener('input', update);
+            sliderEnd.addEventListener('input', update);
+            document.querySelectorAll('#powerflow-modal .quick-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const s = parseInt(btn.dataset.start);
+                    const e = parseInt(btn.dataset.end);
+                    sliderStart.value = s; sliderEnd.value = e;
+                    updatePowerflowRange(s, e);
+                    document.querySelectorAll('#powerflow-modal .quick-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
+        }
+        function closePowerFlowModal() {
+            document.getElementById('powerflow-modal').classList.remove('active');
+            if (powerFlowDetailChart) { powerFlowDetailChart.destroy(); powerFlowDetailChart = null; }
+        }
+        function closePowerFlowModalOnOverlay(e) { if (e.target.id === 'powerflow-modal') closePowerFlowModal(); }
+
+        function renderPowerFlowStats(data) {
+            if (data.length === 0) {
+                document.getElementById('powerflow-stats').innerHTML = '<p style="grid-column: span 4; text-align: center; color: #64748b; padding: 20px;">데이터 없음</p>';
+                return;
+            }
+            const loads = data.map(d => d.load_kw);
+            const solars = data.map(d => d.solar_kw);
+            const avgLoad = loads.reduce((a,b) => a+b, 0) / loads.length;
+            const maxLoad = Math.max(...loads);
+            const avgSolar = solars.reduce((a,b) => a+b, 0) / solars.length;
+            const maxSolar = Math.max(...solars);
+            const dateInfo = data[0].date ? ` (${data[0].date})` : '';
+            document.getElementById('powerflow-stats').innerHTML = `
+                <div class="stat-card"><div class="stat-label">평균 부하${dateInfo}</div><div class="stat-value">${avgLoad.toFixed(1)} kW</div></div>
+                <div class="stat-card"><div class="stat-label">최대 부하</div><div class="stat-value">${maxLoad.toFixed(1)} kW</div></div>
+                <div class="stat-card"><div class="stat-label">평균 태양광</div><div class="stat-value">${avgSolar.toFixed(1)} kW</div></div>
+                <div class="stat-card"><div class="stat-label">최대 태양광</div><div class="stat-value">${maxSolar.toFixed(1)} kW</div></div>
+            `;
+        }
+
+        function renderPowerFlowDetailChart(data) {
+            const ctx = document.getElementById('powerFlowDetailChart').getContext('2d');
+            if (powerFlowDetailChart) powerFlowDetailChart.destroy();
+            if (data.length === 0) {
+                powerFlowDetailChart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: ['데이터 없음'], datasets: [] },
+                    options: { responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false },
+                                   title: { display: true, text: '데이터가 없습니다', color: '#94a3b8' } } }
+                });
+                return;
+            }
+            powerFlowDetailChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: data.map(d => d.hour), datasets: [
+                    { label: '부하', data: data.map(d => d.load_kw), borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: '태양광', data: data.map(d => d.solar_kw), borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: 'BESS', data: data.map(d => d.bess_power_kw), borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: '계통', data: data.map(d => d.grid_power_kw), borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                ]},
+                options: { responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { labels: { color: '#e2e8f0' } },
+                               tooltip: { mode: 'index', intersect: false } },
+                    scales: { y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
+                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } } }
+                }
+            });
+        }
+
+        function renderPowerFlowTable(data) {
+            const tbody = document.getElementById('powerflow-tbody');
+            tbody.innerHTML = '';
+            data.forEach(d => {
+                tbody.innerHTML += `<tr><td>${d.hour}</td><td>${d.load_kw.toFixed(2)}</td><td>${d.solar_kw.toFixed(2)}</td><td>${d.bess_power_kw.toFixed(2)}</td><td>${d.grid_power_kw.toFixed(2)}</td><td>${d.soc.toFixed(1)}</td><td>${d.sample_count || '-'}</td></tr>`;
+            });
+        }
+
+        // ============ Rule-Based vs LSTM 비교 모달 ============
+        function openComparisonModal() {
+            document.getElementById('comparison-modal').classList.add('active');
+            const modalContent = document.getElementById('comparison-modal-content');
+            modalContent.scrollTop = 0;
+            fetch('/api/comparison?hours=168').then(r => r.json()).then(res => {
+                const data = res.data || [];
+                renderComparisonSummary(data);
+                renderComparisonTable(data);
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => { renderComparisonCharts(data); }, 200);
+                    });
+                });
+            });
+        }
+        function closeComparisonModal() {
+            document.getElementById('comparison-modal').classList.remove('active');
+            Object.keys(comparisonCharts).forEach(key => {
+                if (comparisonCharts[key]) { comparisonCharts[key].destroy(); comparisonCharts[key] = null; }
+            });
+        }
+        function closeComparisonModalOnOverlay(e) { if (e.target.id === 'comparison-modal') closeComparisonModal(); }
+
+        function renderComparisonSummary(data) {
+            if (data.length === 0) {
+                document.getElementById('comparison-summary-stats').innerHTML = '<p style="grid-column: span 4; text-align: center; color: #64748b; padding: 20px;">아직 비교 데이터가 없습니다</p>';
+                return;
+            }
+            let lstmWins = 0, rbWins = 0, equals = 0;
+            const latest = data[data.length - 1];
+            const metrics = [
+                { lstm: latest.lstm.soc, rb: latest.rb.soc, higherBetter: true },
+                { lstm: latest.lstm.self_sufficiency, rb: latest.rb.self_sufficiency, higherBetter: true },
+                { lstm: latest.lstm.cycle, rb: latest.rb.cycle, higherBetter: null },
+                { lstm: latest.lstm.cost_saving, rb: latest.rb.cost_saving, higherBetter: true },
+            ];
+            metrics.forEach(m => {
+                const diff = m.lstm - m.rb;
+                if (m.higherBetter === null) equals += 1;
+                else if (Math.abs(diff) < 0.01) equals += 1;
+                else if ((m.higherBetter && diff > 0) || (!m.higherBetter && diff < 0)) lstmWins += 1;
+                else rbWins += 1;
+            });
+            document.getElementById('comparison-summary-stats').innerHTML = `
+                <div class="stat-card"><div class="stat-label">LSTM 우위</div><div class="stat-value" style="color: #3b82f6;">${lstmWins}개</div></div>
+                <div class="stat-card"><div class="stat-label">Rule-Based 우위</div><div class="stat-value" style="color: #10b981;">${rbWins}개</div></div>
+                <div class="stat-card"><div class="stat-label">동일</div><div class="stat-value" style="color: #94a3b8;">${equals}개</div></div>
+                <div class="stat-card"><div class="stat-label">수집 시간</div><div class="stat-value" style="color: #f59e0b;">${data.length}h</div></div>
+            `;
+        }
+
+        function makeComparisonChartConfig(label, lstmData, rbData, labels, unit) {
+            return {
+                type: 'line',
+                data: { labels, datasets: [
+                    { label: 'LSTM', data: lstmData, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 2 },
+                    { label: 'Rule-Based', data: rbData, borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 2 },
+                ]},
+                options: { responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 10 } } },
+                               tooltip: { mode: 'index', intersect: false } },
+                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', font: { size: 8 }, maxTicksLimit: 6 } } }
+                }
+            };
+        }
+
+        function renderComparisonCharts(data) {
+            Object.keys(comparisonCharts).forEach(key => {
+                if (comparisonCharts[key]) { comparisonCharts[key].destroy(); comparisonCharts[key] = null; }
+            });
+            if (data.length === 0) return;
+            const labels = data.map(d => {
+                const ts = new Date(d.timestamp);
+                return `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
+            });
+            comparisonCharts.selfSuff = new Chart(document.getElementById('comparisonSelfSuffChart').getContext('2d'),
+                makeComparisonChartConfig('자립률', data.map(d => d.lstm.self_sufficiency), data.map(d => d.rb.self_sufficiency), labels, '%'));
+            comparisonCharts.soc = new Chart(document.getElementById('comparisonSocChart').getContext('2d'),
+                makeComparisonChartConfig('SOC', data.map(d => d.lstm.soc), data.map(d => d.rb.soc), labels, '%'));
+            comparisonCharts.cycle = new Chart(document.getElementById('comparisonCycleChart').getContext('2d'),
+                makeComparisonChartConfig('사이클', data.map(d => d.lstm.cycle), data.map(d => d.rb.cycle), labels, '회'));
+            comparisonCharts.saving = new Chart(document.getElementById('comparisonSavingChart').getContext('2d'),
+                makeComparisonChartConfig('절감액', data.map(d => d.lstm.cost_saving), data.map(d => d.rb.cost_saving), labels, '원'));
+        }
+
+        function renderComparisonTable(data) {
+            const tbody = document.getElementById('comparison-modal-tbody');
+            tbody.innerHTML = '';
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 20px;">데이터 없음</td></tr>';
+                return;
+            }
+            const reversedData = [...data].reverse();
+            reversedData.forEach((entry) => {
+                const ts = new Date(entry.timestamp);
+                const timeStr = `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
+                const metrics = [
+                    { label: 'SOC (%)', lstm: 'soc', rb: 'soc', fmt: (v) => v.toFixed(1), higherBetter: true },
+                    { label: '자립률 (%)', lstm: 'self_sufficiency', rb: 'self_sufficiency', fmt: (v) => v.toFixed(1), higherBetter: true },
+                    { label: '사이클', lstm: 'cycle', rb: 'cycle', fmt: (v) => v.toFixed(2), higherBetter: null },
+                    { label: '절감액 (원)', lstm: 'cost_saving', rb: 'cost_saving', fmt: (v) => Math.round(v).toLocaleString(), higherBetter: true },
+                ];
+                tbody.innerHTML += `<tr style="background: rgba(59, 130, 246, 0.1);"><td colspan="6" style="padding: 5px 8px; font-weight: 500; color: #cbd5e1;">${timeStr} (샘플 ${entry.sample_count || 1}개)</td></tr>`;
+                metrics.forEach((m) => {
+                    const lstmVal = entry.lstm[m.lstm] || 0;
+                    const rbVal = entry.rb[m.rb] || 0;
+                    const diff = lstmVal - rbVal;
+                    let winner = '', lstmClass = '', rbClass = '';
+                    if (m.higherBetter === null) winner = '-';
+                    else if (Math.abs(diff) < 0.01) winner = '동일';
+                    else if ((m.higherBetter && diff > 0) || (!m.higherBetter && diff < 0)) { winner = 'LSTM'; lstmClass = 'better'; }
+                    else { winner = 'Rule-Based'; rbClass = 'better'; }
+                    const diffStr = m.label.includes('원')
+                        ? `${diff >= 0 ? '+' : ''}${Math.round(diff).toLocaleString()}`
+                        : `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}`;
+                    tbody.innerHTML += `<tr><td></td><td style="text-align: left; color: #94a3b8;">${m.label}</td><td class="${lstmClass}">${m.fmt(lstmVal)}</td><td class="${rbClass}">${m.fmt(rbVal)}</td><td>${diffStr}</td><td style="color: ${winner === 'LSTM' ? '#3b82f6' : winner === 'Rule-Based' ? '#10b981' : '#94a3b8'};">${winner}</td></tr>`;
+                });
+            });
+        }
+
+        // ============ ESC 키로 모달 닫기 ============
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal(); closePowerFlowModal(); closeComparisonModal();
+            }
+        });
+
+        // ============ 자동 업데이트 ============
+        setInterval(() => fetch('/api/status').then(r => r.json()).then(updateMetrics).catch(e => {}), 1000);
+        setInterval(() => fetch('/api/daily-stats').then(r => r.json()).then(updateStats).catch(e => {}), 10000);
+        setInterval(() => {
+            if (currentPage === 4) updateComparison();
+        }, 5000);
+
+        function updateMetrics(data) {
+            if (!data) return;
+            const el = (id) => document.getElementById(id);
+            if (el('soc-value')) el('soc-value').textContent = parseFloat(data.soc || 0).toFixed(1);
+            if (el('bess-power')) el('bess-power').textContent = parseFloat(data.bess_power_kw || 0).toFixed(1);
+            if (el('load-kw')) el('load-kw').textContent = parseFloat(data.load_kw || 0).toFixed(1);
+            const solarEl = el('solar-info');
+            if (solarEl) solarEl.textContent = `태양광: ${parseFloat(data.solar_kw || 0).toFixed(1)} kW`;
+            if (el('tariff-rate')) el('tariff-rate').textContent = parseInt(data.tariff_rate || 0);
+            const map = {'on_peak': '최대', 'mid_peak': '중간', 'off_peak': '경부'};
+            const tariffEl = el('tariff-period');
+            if (tariffEl) tariffEl.textContent = map[data.tariff_period] || '-';
+            const grid = parseFloat(data.grid_power_kw || 0).toFixed(1);
+            if (el('grid-power')) el('grid-power').textContent = grid;
+            const gridEl = el('grid-status');
+            if (gridEl) gridEl.textContent = grid < 0 ? `역송 ${Math.abs(grid)} kW` : `구매 ${grid} kW`;
+            const card = el('bess-power-card');
+            if (card) {
+                const bp = parseFloat(data.bess_power_kw || 0).toFixed(1);
+                card.classList.remove('charging', 'discharging');
+                if (bp < -1) {
+                    card.classList.add('charging');
+                    const a = el('bess-action');
+                    if (a) a.textContent = '충전 중';
+                } else if (bp > 1) {
+                    card.classList.add('discharging');
+                    const a = el('bess-action');
+                    if (a) a.textContent = '방전 중';
+                } else {
+                    const a = el('bess-action');
+                    if (a) a.textContent = '대기';
+                }
+            }
+        }
+
+        function updateStats(data) {
+            const el = (id) => document.getElementById(id);
+            if (el('self-sufficiency')) el('self-sufficiency').textContent = (data.self_sufficiency_pct || 0).toFixed(1);
+            if (el('daily-saving')) el('daily-saving').textContent = (data.daily_saving_won || 0).toLocaleString();
+            const dEl = el('discharge-info');
+            if (dEl) dEl.textContent = `방전: ${(data.discharge_kwh || 0).toFixed(2)} kWh`;
+            if (el('cycle-count')) el('cycle-count').textContent = (data.cycle_count || 0).toFixed(2);
+            if (el('charge-kwh')) el('charge-kwh').textContent = (data.charge_kwh || 0).toFixed(2);
+            if (el('total-discharge-kwh')) el('total-discharge-kwh').textContent = (data.discharge_kwh || 0).toFixed(2);
+            if (el('reverse-power')) el('reverse-power').textContent = (data.reverse_power_kwh || 0).toFixed(2);
+            if (el('total-load')) el('total-load').textContent = (data.total_load_kwh || 0).toFixed(2);
+        }
+
+        function updateComparison() {
+            fetch('/api/comparison?hours=168').then(r => r.json()).then(res => {
+                const data = res.data || [];
+                if (data.length === 0) {
+                    document.getElementById('comparison-table').innerHTML = '<p style="text-align: center; color: #64748b; padding: 20px;">아직 비교 데이터가 없습니다.<br>1시간마다 자동 수집됩니다.</p>';
+                    return;
+                }
+                let html = `<table><tr><th>시간</th><th>지표</th><th class="lstm">LSTM</th><th class="rb">Rule-Based</th></tr>`;
+                const reversedData = [...data].reverse();
+                reversedData.forEach((entry) => {
+                    const ts = new Date(entry.timestamp);
+                    const timeStr = `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
+                    const metrics = [
+                        { label: 'SOC (%)', lstm: 'soc', rb: 'soc', fmt: (v) => v.toFixed(1) },
+                        { label: '자립률 (%)', lstm: 'self_sufficiency', rb: 'self_sufficiency', fmt: (v) => v.toFixed(1) },
+                        { label: '사이클', lstm: 'cycle', rb: 'cycle', fmt: (v) => v.toFixed(2) },
+                        { label: '절감액 (원)', lstm: 'cost_saving', rb: 'cost_saving', fmt: (v) => Math.round(v).toLocaleString() },
+                    ];
+                    html += `<tr class="hour-row"><td colspan="4" class="hour-cell">${timeStr} (평균 ${entry.sample_count || 1}개)</td></tr>`;
+                    metrics.forEach((m) => {
+                        const lstmVal = entry.lstm[m.lstm] || 0;
+                        const rbVal = entry.rb[m.rb] || 0;
+                        const isBetterLstm = lstmVal > rbVal;
+                        html += `<tr><td></td><td class="metric-name">${m.label}</td><td class="${isBetterLstm ? 'better' : ''}">${m.fmt(lstmVal)}</td><td class="${!isBetterLstm ? 'better' : ''}">${m.fmt(rbVal)}</td></tr>`;
+                    });
+                });
+                html += '</table>';
+                document.getElementById('comparison-table').innerHTML = html;
+            }).catch(e => {});
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('powerChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: '부하', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: '태양광', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: 'BESS', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: '계통', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                ]},
+                options: { responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
+                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } } },
+                    plugins: { legend: { labels: { color: '#e2e8f0' } } } }
+            });
+        }
+
+        function updateChart() {
+            if (!chart) initChart();
+            fetch('/api/history?hours=24').then(r => r.json()).then(res => {
+                const d = res.data || [];
+                if (d.length === 0) return;
+                chart.data.labels = d.map(x => {
+                    const dt = new Date(x.timestamp);
+                    return `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+                });
+                chart.data.datasets[0].data = d.map(x => x.load_kw);
+                chart.data.datasets[1].data = d.map(x => x.solar_kw);
+                chart.data.datasets[2].data = d.map(x => x.bess_power_kw);
+                chart.data.datasets[3].data = d.map(x => x.grid_power_kw);
+                chart.update('none');
+            });
+            setTimeout(() => {
+                if (currentPage === 3 && chart) chart.resize();
+            }, 100);
+        }
+
+        // 차트 페이지 자동 업데이트 (페이지 3에 있을 때만)
+        setInterval(() => {
+            if (currentPage === 3) updateChart();
+        }, 10000);
+
+        window.addEventListener('load', () => {
+            renderCards(1);
+            fetch('/api/status').then(r => r.json()).then(updateMetrics);
+            fetch('/api/daily-stats').then(r => r.json()).then(updateStats);
+        });
+    </script>
+</body>
+</html>"""
+
+
 if __name__ == '__main__':
     print("=" * 62)
     print("  BESS 실시간 모니터링 시스템")
@@ -2034,6 +3268,7 @@ if __name__ == '__main__':
     print("[시작] 1시간 비교 데이터 스레드 시작\n")
     
     print("[서버] http://localhost:5000 에서 실행 중...")
+    print("[모바일/Pi4] http://localhost:5000/mobile (4페이지 구성)")
     print("[기능] 박스 클릭 -> 일별 분석 모달")
     print("[기능] 전력흐름 클릭 -> 일일 상세 모달")
     print("[기능] 비교 표 -> 1시간 평균값으로 표시\n")
