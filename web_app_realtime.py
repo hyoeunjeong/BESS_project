@@ -399,6 +399,355 @@ def api_comparison():
     return jsonify({'data': get_comparison_data(hours)})
 
 
+# =====================================================================
+# 1년치 진짜 비교 데이터 (comparison_metrics.csv 활용)
+# =====================================================================
+YEARLY_COMPARISON_CSV = PROJECT_ROOT / 'comparison_results' / 'comparison_metrics.csv'
+
+
+def get_yearly_comparison() -> dict:
+    """
+    1년치 시뮬레이션 비교 결과 로드 (compare.py 결과)
+    
+    Returns
+    -------
+    dict : 카테고리별로 정리된 비교 데이터
+        {
+          'economic': [{지표, RB, LSTM, 단위, 우위}],
+          'energy':   [...],
+          'stability':[...],
+          'prediction':[...],
+          'summary':  {LSTM_wins, RB_wins, equals, ...}
+        }
+    """
+    if not YEARLY_COMPARISON_CSV.exists():
+        return {
+            'available': False,
+            'message': f'{YEARLY_COMPARISON_CSV.name} 파일이 없습니다. compare.py를 먼저 실행하세요.',
+        }
+    
+    try:
+        import csv
+        rows = []
+        with open(YEARLY_COMPARISON_CSV, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(row)
+        
+        # 지표별 메타데이터 (단위, 높을수록 좋은지, 표시 이름)
+        METRIC_META = {
+            # 경제적 효율
+            'baseline_cost_won':    {'name': '기준 전기요금',    'unit': '원',  'higher_better': None,  'fmt': 'int'},
+            'bess_cost_won':        {'name': 'BESS 운영 요금',   'unit': '원',  'higher_better': False, 'fmt': 'int'},
+            'cost_saving_won':      {'name': '요금 절감액',      'unit': '원',  'higher_better': True,  'fmt': 'int'},
+            'cost_saving_rate_pct': {'name': '요금 절감률',      'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'peak_saving_rate_pct': {'name': '피크 요금 절감률', 'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            # 시간대별
+            'off_peak_baseline':    {'name': '경부하 기준 요금', 'unit': '원',  'higher_better': None,  'fmt': 'int'},
+            'off_peak_bess':        {'name': '경부하 BESS 요금', 'unit': '원',  'higher_better': False, 'fmt': 'int'},
+            'off_peak_saving':      {'name': '경부하 절감액',    'unit': '원',  'higher_better': True,  'fmt': 'int'},
+            'off_peak_rate_pct':    {'name': '경부하 절감률',    'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'mid_peak_baseline':    {'name': '중간 기준 요금',   'unit': '원',  'higher_better': None,  'fmt': 'int'},
+            'mid_peak_bess':        {'name': '중간 BESS 요금',   'unit': '원',  'higher_better': False, 'fmt': 'int'},
+            'mid_peak_saving':      {'name': '중간 절감액',      'unit': '원',  'higher_better': True,  'fmt': 'int'},
+            'mid_peak_rate_pct':    {'name': '중간 절감률',      'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'on_peak_baseline':    {'name': '최대 기준 요금',   'unit': '원',  'higher_better': None,  'fmt': 'int'},
+            'on_peak_bess':        {'name': '최대 BESS 요금',   'unit': '원',  'higher_better': False, 'fmt': 'int'},
+            'on_peak_saving':      {'name': '최대 절감액',      'unit': '원',  'higher_better': True,  'fmt': 'int'},
+            'on_peak_rate_pct':    {'name': '최대 절감률',      'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            # 에너지 효율
+            'total_load_kwh':         {'name': '총 부하 에너지',  'unit': 'kWh', 'higher_better': None,  'fmt': 'float2'},
+            'total_solar_kwh':        {'name': '총 태양광',       'unit': 'kWh', 'higher_better': None,  'fmt': 'float2'},
+            'direct_solar_kwh':       {'name': '태양광 직접 사용','unit': 'kWh', 'higher_better': True,  'fmt': 'float2'},
+            'bess_discharge_kwh':     {'name': 'BESS 방전 공급',  'unit': 'kWh', 'higher_better': True,  'fmt': 'float2'},
+            'self_sufficiency_pct':   {'name': '자립률',          'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'bess_utilization_pct':   {'name': 'BESS 활용률',     'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'roundtrip_efficiency_pct':{'name': '라운드트립 효율','unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'solar_utilization_pct':  {'name': '태양광 활용률',   'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'energy_loss_kwh':        {'name': '에너지 손실',     'unit': 'kWh', 'higher_better': False, 'fmt': 'float2'},
+            'curtailment_kwh':        {'name': '출력 제한',       'unit': 'kWh', 'higher_better': False, 'fmt': 'float2'},
+            # 운영 안정성
+            'soc_out_of_range_count': {'name': 'SOC 범위 초과',  'unit': '회',  'higher_better': False, 'fmt': 'int'},
+            'supply_shortage_count':  {'name': '공급 부족',      'unit': '회',  'higher_better': False, 'fmt': 'int'},
+            'cycle_count':            {'name': '배터리 사이클',  'unit': '회',  'higher_better': None,  'fmt': 'float2'},
+            'transitions_per_day':    {'name': '일일 전환 빈도', 'unit': '회/일','higher_better': False,'fmt': 'float2'},
+            'prevention_rate_pct':    {'name': '과충·방전 방지율','unit': '%',  'higher_better': True,  'fmt': 'float2'},
+            'control_success_rate_pct':{'name': '제어 성공률',   'unit': '%',   'higher_better': True,  'fmt': 'float2'},
+            'soc_max_pct':            {'name': 'SOC 최대',       'unit': '%',   'higher_better': None,  'fmt': 'float2'},
+            'soc_min_pct':            {'name': 'SOC 최소',       'unit': '%',   'higher_better': None,  'fmt': 'float2'},
+            'soc_avg_pct':            {'name': 'SOC 평균',       'unit': '%',   'higher_better': None,  'fmt': 'float2'},
+            'charge_count':           {'name': '충전 횟수',      'unit': '회',  'higher_better': None,  'fmt': 'int'},
+            'discharge_count':        {'name': '방전 횟수',      'unit': '회',  'higher_better': None,  'fmt': 'int'},
+            'idle_count':             {'name': '대기 횟수',      'unit': '회',  'higher_better': None,  'fmt': 'int'},
+            # LSTM 예측 성능
+            'mae_kw':   {'name': 'MAE',  'unit': 'kW', 'higher_better': False, 'fmt': 'float3'},
+            'rmse_kw':  {'name': 'RMSE', 'unit': 'kW', 'higher_better': False, 'fmt': 'float3'},
+            'mape_pct': {'name': 'MAPE', 'unit': '%',  'higher_better': False, 'fmt': 'float2'},
+        }
+        
+        # 카테고리 매핑
+        CATEGORY_MAP = {
+            '경제적 효율':          'economic',
+            '경제적 효율 (breakdown)': 'economic_breakdown',
+            '에너지 효율':          'energy',
+            '운영 안정성':          'stability',
+            'LSTM 예측 성능':       'prediction',
+        }
+        
+        # 결과 구성
+        result = {
+            'available': True,
+            'economic': [],
+            'economic_breakdown': [],
+            'energy': [],
+            'stability': [],
+            'prediction': [],
+        }
+        
+        lstm_wins = 0
+        rb_wins = 0
+        equals = 0
+        
+        def _to_float(s):
+            try:
+                return float(str(s).replace(',', ''))
+            except (ValueError, TypeError):
+                return None
+        
+        for row in rows:
+            cat = row.get('카테고리', '').strip()
+            metric = row.get('지표', '').strip()
+            rb_raw = row.get('Rule-Based', '').strip()
+            lstm_raw = row.get('LSTM', '').strip()
+            
+            cat_key = CATEGORY_MAP.get(cat)
+            if not cat_key:
+                continue
+            
+            meta = METRIC_META.get(metric, {})
+            name = meta.get('name', metric)
+            unit = meta.get('unit', '')
+            higher_better = meta.get('higher_better')
+            fmt_type = meta.get('fmt', 'float2')
+            
+            rb_val = _to_float(rb_raw)
+            lstm_val = _to_float(lstm_raw)
+            
+            # 우위 판정
+            winner = None
+            diff = None
+            if rb_val is not None and lstm_val is not None and higher_better is not None:
+                diff = lstm_val - rb_val
+                if abs(diff) < 1e-6:
+                    winner = 'equal'
+                    if cat_key != 'economic_breakdown':
+                        equals += 1
+                elif (higher_better and diff > 0) or (not higher_better and diff < 0):
+                    winner = 'lstm'
+                    if cat_key != 'economic_breakdown':
+                        lstm_wins += 1
+                else:
+                    winner = 'rb'
+                    if cat_key != 'economic_breakdown':
+                        rb_wins += 1
+            
+            entry = {
+                'metric_key': metric,
+                'name': name,
+                'rb': rb_val,
+                'lstm': lstm_val,
+                'rb_raw': rb_raw,
+                'lstm_raw': lstm_raw,
+                'unit': unit,
+                'higher_better': higher_better,
+                'fmt': fmt_type,
+                'winner': winner,
+                'diff': diff,
+            }
+            result[cat_key].append(entry)
+        
+        result['summary'] = {
+            'lstm_wins': lstm_wins,
+            'rb_wins': rb_wins,
+            'equals': equals,
+            'total': lstm_wins + rb_wins + equals,
+        }
+        
+        return result
+    except Exception as e:
+        return {
+            'available': False,
+            'message': f'비교 데이터 로드 실패: {str(e)}',
+        }
+
+
+@app.route('/api/yearly-comparison')
+def api_yearly_comparison():
+    """1년치 시뮬레이션 비교 결과 (compare.py 결과)"""
+    return jsonify(get_yearly_comparison())
+
+
+# =====================================================================
+# 월별 비교 데이터 (시뮬레이션 CSV 직접 분석)
+# =====================================================================
+RB_SIMULATION_CSV   = PROJECT_ROOT / 'rule_based' / 'results' / 'rb_simulation_result.csv'
+LSTM_SIMULATION_CSV = PROJECT_ROOT / 'DL_LSTM'   / 'results' / 'lstm_simulation_result.csv'
+
+# 월별 비교 결과 캐시 (CSV는 변하지 않으므로 1회만 계산)
+_MONTHLY_COMPARISON_CACHE = None
+
+
+def _compute_monthly_stats(csv_path) -> dict:
+    """
+    시뮬레이션 CSV를 읽어서 월별 통계 계산.
+    
+    Returns
+    -------
+    dict : {month: {self_sufficiency, soc_avg, cycle, cost_saving, total_load, ...}}
+    """
+    import csv as csv_mod
+    from collections import defaultdict
+    
+    if not csv_path.exists():
+        return {}
+    
+    # 월별로 그룹화 (1~12월)
+    monthly = defaultdict(lambda: {
+        'load_kw': [], 'solar_kw': [], 'bess_power_kw': [],
+        'grid_power_kw': [], 'soc': [], 'tariff_rate': [],
+        'charge_kw': [], 'discharge_kw': [],
+        'action_charge': 0, 'action_discharge': 0, 'count': 0,
+    })
+    
+    try:
+        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv_mod.DictReader(f)
+            for row in reader:
+                ts = row.get('timestamp', '')
+                if not ts or len(ts) < 7:
+                    continue
+                try:
+                    month = int(ts[5:7])  # 'YYYY-MM-DD ...' → MM
+                except ValueError:
+                    continue
+                
+                m = monthly[month]
+                def _f(key, default=0.0):
+                    try: return float(row.get(key, default))
+                    except (ValueError, TypeError): return default
+                
+                m['load_kw'].append(_f('load_kw'))
+                m['solar_kw'].append(_f('solar_kw'))
+                m['bess_power_kw'].append(_f('bess_power_kw'))
+                m['grid_power_kw'].append(_f('grid_power_kw'))
+                m['soc'].append(_f('soc'))
+                m['tariff_rate'].append(_f('tariff_rate'))
+                m['charge_kw'].append(_f('charge_kw'))
+                m['discharge_kw'].append(_f('discharge_kw'))
+                
+                action = row.get('action', '').strip()
+                if action == 'charge': m['action_charge'] += 1
+                elif action == 'discharge': m['action_discharge'] += 1
+                m['count'] += 1
+    except Exception as e:
+        print(f"[월별 분석 오류] {csv_path.name}: {e}")
+        return {}
+    
+    # 월별 통계 계산
+    result = {}
+    for month, data in monthly.items():
+        if data['count'] == 0:
+            continue
+        
+        n = data['count']
+        load_sum = sum(data['load_kw'])
+        solar_sum = sum(data['solar_kw'])
+        charge_sum = sum(data['charge_kw'])
+        discharge_sum = sum(data['discharge_kw'])
+        
+        # 자립률: (태양광 직접사용 + BESS 방전) / 부하 × 100
+        direct_solar = sum(min(s, l) for s, l in zip(data['solar_kw'], data['load_kw']))
+        self_suff = (direct_solar + discharge_sum) / load_sum * 100 if load_sum > 0 else 0
+        
+        # 절감액: 기준(BESS 없을 때) - 실제(BESS 있을 때)
+        # 기준: grid_power = load - solar 일 때의 전기요금
+        # 실제: 현재 grid_power의 전기요금
+        baseline_cost = sum(max(0, l - s) * r for l, s, r 
+                            in zip(data['load_kw'], data['solar_kw'], data['tariff_rate']))
+        actual_cost = sum(max(0, g) * r for g, r 
+                          in zip(data['grid_power_kw'], data['tariff_rate']))
+        saving = baseline_cost - actual_cost
+        
+        # 사이클: 충전+방전 / (2 × 용량)
+        BESS_CAP = 100.0  # config.BESS_CAPACITY_KWH
+        cycles = (charge_sum + discharge_sum) / (2 * BESS_CAP) if BESS_CAP > 0 else 0
+        
+        result[month] = {
+            'self_sufficiency_pct': round(self_suff, 2),
+            'soc_avg_pct': round(sum(data['soc']) / n * 100, 2),
+            'cycle_count': round(cycles, 2),
+            'cost_saving_won': round(saving, 0),
+            'data_count': n,
+        }
+    
+    return result
+
+
+def get_monthly_comparison() -> dict:
+    """
+    월별 LSTM vs Rule-Based 비교 데이터 (시뮬레이션 CSV 기반).
+    캐싱: CSV 파일은 변하지 않으므로 1회만 계산.
+    """
+    global _MONTHLY_COMPARISON_CACHE
+    if _MONTHLY_COMPARISON_CACHE is not None:
+        return _MONTHLY_COMPARISON_CACHE
+    
+    rb_stats   = _compute_monthly_stats(RB_SIMULATION_CSV)
+    lstm_stats = _compute_monthly_stats(LSTM_SIMULATION_CSV)
+    
+    if not rb_stats and not lstm_stats:
+        result = {
+            'available': False,
+            'message': '시뮬레이션 CSV 파일이 없습니다. (rule_based/results/, DL_LSTM/results/)',
+        }
+        _MONTHLY_COMPARISON_CACHE = result
+        return result
+    
+    # 둘 다 데이터가 있는 월만 비교 (LSTM은 테스트셋만 있을 수 있음)
+    common_months = sorted(set(rb_stats.keys()) & set(lstm_stats.keys()))
+    rb_only_months = sorted(set(rb_stats.keys()) - set(lstm_stats.keys()))
+    
+    # 데이터 구성
+    months_data = []
+    for m in range(1, 13):
+        entry = {
+            'month': m,
+            'month_label': f'{m}월',
+            'rb': rb_stats.get(m),
+            'lstm': lstm_stats.get(m),
+            'has_both': m in common_months,
+            'rb_only': m in rb_only_months,
+        }
+        months_data.append(entry)
+    
+    result = {
+        'available': True,
+        'months': months_data,
+        'common_months': common_months,
+        'rb_only_months': rb_only_months,
+        'rb_total_months': len(rb_stats),
+        'lstm_total_months': len(lstm_stats),
+    }
+    _MONTHLY_COMPARISON_CACHE = result
+    return result
+
+
+@app.route('/api/monthly-comparison')
+def api_monthly_comparison():
+    """월별 비교 데이터 (시뮬레이션 CSV 기반)"""
+    return jsonify(get_monthly_comparison())
+
+
 def hourly_comparison_task():
     """1시간마다 비교 데이터 저장"""
     last_hour = -1
@@ -904,11 +1253,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
             <div class="comparison-section">
                 <div class="section-title">
-                    <span>Rule-Based vs LSTM 비교 (시간별 평균)</span>
+                    <span>Rule-Based vs LSTM 비교 (1년치 시뮬레이션)</span>
                     <button class="detail-btn" onclick="openComparisonModal()">상세 보기 ↗</button>
                 </div>
-                <div class="comparison-table" id="comparison-table">
-                    <p style="text-align: center; color: #64748b; padding: 20px;">데이터 수집 중...</p>
+                
+                <!-- 종합 우위 카드 -->
+                <div class="stats-grid" id="yearly-summary-stats" style="margin-bottom: 12px;">
+                    <p style="grid-column: span 4; text-align: center; color: #64748b; padding: 10px;">데이터 로드 중...</p>
+                </div>
+                
+                <!-- 핵심 지표 표 -->
+                <div class="comparison-table" id="yearly-comparison-table">
+                    <p style="text-align: center; color: #64748b; padding: 20px;">데이터 로드 중...</p>
                 </div>
             </div>
         </div>
@@ -1008,7 +1364,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="modal-header">
                 <div>
                     <div class="modal-title">Rule-Based vs LSTM 성능 비교</div>
-                    <div class="modal-subtitle">시간별 성능 추이 및 종합 분석</div>
+                    <div class="modal-subtitle">1년치 시뮬레이션 결과 상세 분석</div>
                 </div>
                 <button class="close-btn" onclick="closeComparisonModal()">X</button>
             </div>
@@ -1016,41 +1372,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- 종합 우위 카드 -->
             <div class="stats-grid" id="comparison-summary-stats"></div>
             
-            <!-- 4개 지표 차트 (2x2 그리드) -->
+            <!-- 월별 비교 그래프 4개 -->
+            <div id="monthly-charts-info" class="info-box" style="margin-top: 8px;">
+                월별 비교 그래프 (2025년 시뮬레이션 데이터)
+            </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                <div class="modal-chart-container" style="height: 200px;">
+                <div class="modal-chart-container" style="height: 220px;">
                     <div class="comparison-chart-title">자립률 추이 (%)</div>
                     <canvas id="comparisonSelfSuffChart"></canvas>
                 </div>
-                <div class="modal-chart-container" style="height: 200px;">
-                    <div class="comparison-chart-title">SOC 추이 (%)</div>
+                <div class="modal-chart-container" style="height: 220px;">
+                    <div class="comparison-chart-title">평균 SOC 추이 (%)</div>
                     <canvas id="comparisonSocChart"></canvas>
                 </div>
-                <div class="modal-chart-container" style="height: 200px;">
-                    <div class="comparison-chart-title">배터리 사이클 (회)</div>
+                <div class="modal-chart-container" style="height: 220px;">
+                    <div class="comparison-chart-title">월별 배터리 사이클 (회)</div>
                     <canvas id="comparisonCycleChart"></canvas>
                 </div>
-                <div class="modal-chart-container" style="height: 200px;">
-                    <div class="comparison-chart-title">절감액 (원)</div>
+                <div class="modal-chart-container" style="height: 220px;">
+                    <div class="comparison-chart-title">월별 절감액 (원)</div>
                     <canvas id="comparisonSavingChart"></canvas>
                 </div>
             </div>
             
-            <!-- 시간별 상세 표 -->
-            <div class="info-box">시간별 LSTM과 Rule-Based의 성능을 비교합니다. 더 좋은 값은 초록색으로 표시됩니다.</div>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>시간</th>
-                        <th>지표</th>
-                        <th style="color: #3b82f6;">LSTM</th>
-                        <th style="color: #10b981;">Rule-Based</th>
-                        <th>차이</th>
-                        <th>우위</th>
-                    </tr>
-                </thead>
-                <tbody id="comparison-modal-tbody"></tbody>
-            </table>
+            <!-- 카테고리별 상세 비교 -->
+            <div id="yearly-detail-container">
+                <p style="text-align: center; color: #64748b; padding: 20px;">데이터 로드 중...</p>
+            </div>
+            
             <button class="scroll-top-btn" id="comparison-scroll-top" onclick="scrollComparisonToTop()" title="맨 위로">↑</button>
         </div>
     </div>
@@ -1491,7 +1840,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (e.target.id === 'powerflow-modal') closePowerFlowModal();
         }
 
-        // ===== Rule-Based vs LSTM 비교 모달 =====
+        // ===== Rule-Based vs LSTM 비교 모달 (1년치 진짜 데이터) =====
+        let yearlyDataCache = null;
+        
         function openComparisonModal() {
             document.getElementById('comparison-modal').classList.add('active');
             
@@ -1512,18 +1863,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 modalContent.dataset.scrollListenerAdded = 'true';
             }
             
-            fetch('/api/comparison?hours=168').then(r => r.json()).then(res => {
-                const data = res.data || [];
-                renderComparisonSummary(data);
-                renderComparisonTable(data);
-                
+            // 1. 1년치 종합 비교 (카테고리별 표)
+            fetch('/api/yearly-comparison').then(r => r.json()).then(res => {
+                yearlyDataCache = res;
+                renderYearlyModalContent(res);
+            }).catch(e => {
+                document.getElementById('yearly-detail-container').innerHTML = 
+                    '<p style="text-align: center; color: #ef4444; padding: 20px;">데이터 로드 실패: ' + e.message + '</p>';
+            });
+            
+            // 2. 월별 비교 (그래프 4개)
+            fetch('/api/monthly-comparison').then(r => r.json()).then(res => {
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        setTimeout(() => {
-                            renderComparisonCharts(data);
-                        }, 200);
+                        setTimeout(() => { renderMonthlyCharts(res); }, 200);
                     });
                 });
+            }).catch(e => {
+                console.error('월별 데이터 로드 실패:', e);
             });
         }
 
@@ -1546,232 +1903,206 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (e.target.id === 'comparison-modal') closeComparisonModal();
         }
 
-        function renderComparisonSummary(data) {
-            if (data.length === 0) {
-                document.getElementById('comparison-summary-stats').innerHTML = '<p style="grid-column: span 4; text-align: center; color: #64748b; padding: 20px;">아직 비교 데이터가 없습니다</p>';
+        // 숫자 포맷 (원/정수/소수)
+        function formatYearlyValue(val, fmt) {
+            if (val === null || val === undefined) return '-';
+            if (fmt === 'int') return Math.round(val).toLocaleString();
+            if (fmt === 'float2') return val.toFixed(2);
+            if (fmt === 'float3') return val.toFixed(3);
+            return val.toString();
+        }
+
+        // 모달: 카테고리별 상세 비교 렌더링
+        function renderYearlyModalContent(data) {
+            if (!data || !data.available) {
+                document.getElementById('comparison-summary-stats').innerHTML = 
+                    '<p style="grid-column: span 4; text-align: center; color: #64748b; padding: 20px;">' + 
+                    (data.message || '비교 데이터 없음') + '</p>';
+                document.getElementById('yearly-detail-container').innerHTML = '';
                 return;
             }
             
-            // 최신 데이터로 우위 집계
-            let lstmWins = 0, rbWins = 0, equals = 0;
-            const latest = data[data.length - 1];
-            
-            const metrics = [
-                { lstm: latest.lstm.soc, rb: latest.rb.soc, higherBetter: true },
-                { lstm: latest.lstm.self_sufficiency, rb: latest.rb.self_sufficiency, higherBetter: true },
-                { lstm: latest.lstm.cycle, rb: latest.rb.cycle, higherBetter: null },
-                { lstm: latest.lstm.cost_saving, rb: latest.rb.cost_saving, higherBetter: true },
-            ];
-            
-            metrics.forEach(m => {
-                const diff = m.lstm - m.rb;
-                if (m.higherBetter === null) {
-                    equals += 1;
-                } else if (Math.abs(diff) < 0.01) {
-                    equals += 1;
-                } else if ((m.higherBetter && diff > 0) || (!m.higherBetter && diff < 0)) {
-                    lstmWins += 1;
-                } else {
-                    rbWins += 1;
-                }
-            });
-            
+            // 종합 우위 카드
+            const summary = data.summary || {};
             document.getElementById('comparison-summary-stats').innerHTML = `
                 <div class="stat-card">
                     <div class="stat-label">LSTM 우위</div>
-                    <div class="stat-value" style="color: #3b82f6;">${lstmWins}개</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Rule-Based 우위</div>
-                    <div class="stat-value" style="color: #10b981;">${rbWins}개</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">동일</div>
-                    <div class="stat-value" style="color: #94a3b8;">${equals}개</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">수집 시간</div>
-                    <div class="stat-value" style="color: #f59e0b;">${data.length}h</div>
+                    <div class="stat-label">전체 지표</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
                 </div>
             `;
-        }
-
-        function makeComparisonChartConfig(label, lstmData, rbData, labels, unit) {
-            return {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'LSTM',
-                            data: lstmData,
-                            borderColor: '#3b82f6',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            borderWidth: 2,
-                            tension: 0.4,
-                            fill: true,
-                            pointRadius: 3,
-                            pointHoverRadius: 6,
-                        },
-                        {
-                            label: 'Rule-Based',
-                            data: rbData,
-                            borderColor: '#10b981',
-                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                            borderWidth: 2,
-                            tension: 0.4,
-                            fill: true,
-                            pointRadius: 3,
-                            pointHoverRadius: 6,
-                        },
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: { 
-                        legend: { labels: { color: '#e2e8f0', font: { size: 11 } } },
-                        tooltip: { mode: 'index', intersect: false }
-                    },
-                    scales: {
-                        y: { 
-                            beginAtZero: true, 
-                            grid: { color: 'rgba(51, 65, 85, 0.3)' }, 
-                            ticks: { color: '#94a3b8', font: { size: 10 } } 
-                        },
-                        x: { 
-                            grid: { color: 'rgba(51, 65, 85, 0.3)' }, 
-                            ticks: { color: '#94a3b8', font: { size: 9 }, maxTicksLimit: 6 } 
+            
+            // 카테고리별 표
+            const categories = [
+                { key: 'economic',           title: '1. 경제적 효율' },
+                { key: 'economic_breakdown', title: '2. 시간대별 절감 (경부/중간/최대)' },
+                { key: 'energy',             title: '3. 에너지 효율' },
+                { key: 'stability',          title: '4. 운영 안정성' },
+                { key: 'prediction',         title: '5. LSTM 예측 성능' },
+            ];
+            
+            let html = '<div class="info-box">2025년 1년치 시뮬레이션 결과 비교. 더 좋은 값은 초록색으로 표시됩니다.</div>';
+            
+            categories.forEach(cat => {
+                const entries = data[cat.key] || [];
+                if (entries.length === 0) return;
+                
+                html += `<div style="margin-bottom: 20px;">
+                    <div style="font-size: 1em; color: #3b82f6; font-weight: 600; margin-bottom: 8px; padding: 6px 12px; background: rgba(59,130,246,0.1); border-radius: 6px;">
+                        ${cat.title}
+                    </div>
+                    <table class="data-table" style="margin-bottom: 5px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left;">지표</th>
+                                <th style="color: #3b82f6;">LSTM</th>
+                                <th style="color: #10b981;">Rule-Based</th>
+                                <th>차이</th>
+                                <th>우위</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                
+                entries.forEach(e => {
+                    const lstmStr = formatYearlyValue(e.lstm, e.fmt) + (e.unit ? ' ' + e.unit : '');
+                    const rbStr   = formatYearlyValue(e.rb,   e.fmt) + (e.unit ? ' ' + e.unit : '');
+                    
+                    let diffStr = '-';
+                    if (e.diff !== null && e.diff !== undefined) {
+                        const sign = e.diff >= 0 ? '+' : '';
+                        if (e.fmt === 'int') {
+                            diffStr = sign + Math.round(e.diff).toLocaleString();
+                        } else if (e.fmt === 'float3') {
+                            diffStr = sign + e.diff.toFixed(3);
+                        } else {
+                            diffStr = sign + e.diff.toFixed(2);
                         }
                     }
-                }
-            };
+                    
+                    let winnerText = '-';
+                    let winnerColor = '#94a3b8';
+                    let lstmClass = '';
+                    let rbClass = '';
+                    if (e.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                    else if (e.winner === 'rb') { winnerText = 'Rule-Based'; winnerColor = '#10b981'; rbClass = 'better'; }
+                    else if (e.winner === 'equal') { winnerText = '동일'; }
+                    
+                    html += `<tr>
+                        <td style="text-align: left; color: #cbd5e1;">${e.name}</td>
+                        <td class="${lstmClass}">${lstmStr}</td>
+                        <td class="${rbClass}">${rbStr}</td>
+                        <td>${diffStr}</td>
+                        <td style="color: ${winnerColor};">${winnerText}</td>
+                    </tr>`;
+                });
+                
+                html += '</tbody></table></div>';
+            });
+            
+            document.getElementById('yearly-detail-container').innerHTML = html;
         }
 
-        function renderComparisonCharts(data) {
+        // 월별 그래프 4개 렌더링
+        function renderMonthlyCharts(data) {
             // 기존 차트 제거
             Object.keys(comparisonCharts).forEach(key => {
-                if (comparisonCharts[key]) {
-                    comparisonCharts[key].destroy();
-                    comparisonCharts[key] = null;
+                if (comparisonCharts[key]) { comparisonCharts[key].destroy(); comparisonCharts[key] = null; }
+            });
+            
+            const infoBox = document.getElementById('monthly-charts-info');
+            
+            if (!data || !data.available) {
+                if (infoBox) {
+                    infoBox.innerHTML = '⚠️ ' + (data.message || '월별 데이터 없음') +
+                        '<br><span style="font-size: 0.85em; color: #94a3b8;">시뮬레이션 CSV 파일이 필요합니다.</span>';
                 }
-            });
-            
-            if (data.length === 0) return;
-            
-            // 라벨 (시간)
-            const labels = data.map(d => {
-                const ts = new Date(d.timestamp);
-                return `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
-            });
-            
-            // 자립률 차트
-            const ctx1 = document.getElementById('comparisonSelfSuffChart').getContext('2d');
-            comparisonCharts.selfSuff = new Chart(ctx1, makeComparisonChartConfig(
-                '자립률',
-                data.map(d => d.lstm.self_sufficiency),
-                data.map(d => d.rb.self_sufficiency),
-                labels,
-                '%'
-            ));
-            
-            // SOC 차트
-            const ctx2 = document.getElementById('comparisonSocChart').getContext('2d');
-            comparisonCharts.soc = new Chart(ctx2, makeComparisonChartConfig(
-                'SOC',
-                data.map(d => d.lstm.soc),
-                data.map(d => d.rb.soc),
-                labels,
-                '%'
-            ));
-            
-            // 사이클 차트
-            const ctx3 = document.getElementById('comparisonCycleChart').getContext('2d');
-            comparisonCharts.cycle = new Chart(ctx3, makeComparisonChartConfig(
-                '사이클',
-                data.map(d => d.lstm.cycle),
-                data.map(d => d.rb.cycle),
-                labels,
-                '회'
-            ));
-            
-            // 절감액 차트
-            const ctx4 = document.getElementById('comparisonSavingChart').getContext('2d');
-            comparisonCharts.saving = new Chart(ctx4, makeComparisonChartConfig(
-                '절감액',
-                data.map(d => d.lstm.cost_saving),
-                data.map(d => d.rb.cost_saving),
-                labels,
-                '원'
-            ));
-        }
-
-        function renderComparisonTable(data) {
-            const tbody = document.getElementById('comparison-modal-tbody');
-            tbody.innerHTML = '';
-            
-            if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 20px;">데이터 없음</td></tr>';
                 return;
             }
             
-            // 최신 데이터부터 역순
-            const reversedData = [...data].reverse();
+            const months = data.months || [];
+            if (months.length === 0) {
+                if (infoBox) infoBox.innerHTML = '월별 데이터 없음';
+                return;
+            }
             
-            reversedData.forEach((entry) => {
-                const ts = new Date(entry.timestamp);
-                const timeStr = `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
-                
-                const metrics = [
-                    { label: 'SOC (%)', lstm: 'soc', rb: 'soc', fmt: (v) => v.toFixed(1), higherBetter: true },
-                    { label: '자립률 (%)', lstm: 'self_sufficiency', rb: 'self_sufficiency', fmt: (v) => v.toFixed(1), higherBetter: true },
-                    { label: '사이클', lstm: 'cycle', rb: 'cycle', fmt: (v) => v.toFixed(2), higherBetter: null },
-                    { label: '절감액 (원)', lstm: 'cost_saving', rb: 'cost_saving', fmt: (v) => Math.round(v).toLocaleString(), higherBetter: true },
-                ];
-                
-                // 시간 헤더 행
-                tbody.innerHTML += `<tr style="background: rgba(59, 130, 246, 0.1);">
-                    <td colspan="6" style="padding: 6px 10px; font-weight: 500; color: #cbd5e1;">${timeStr} (샘플 ${entry.sample_count || 1}개)</td>
-                </tr>`;
-                
-                metrics.forEach((m) => {
-                    const lstmVal = entry.lstm[m.lstm] || 0;
-                    const rbVal = entry.rb[m.rb] || 0;
-                    const diff = lstmVal - rbVal;
-                    
-                    let winner = '';
-                    let lstmClass = '';
-                    let rbClass = '';
-                    
-                    if (m.higherBetter === null) {
-                        winner = '-';
-                    } else if (Math.abs(diff) < 0.01) {
-                        winner = '동일';
-                    } else if ((m.higherBetter && diff > 0) || (!m.higherBetter && diff < 0)) {
-                        winner = 'LSTM';
-                        lstmClass = 'better';
-                    } else {
-                        winner = 'Rule-Based';
-                        rbClass = 'better';
+            // 데이터 추출
+            const labels = months.map(m => m.month_label);
+            const rb_self = months.map(m => m.rb ? m.rb.self_sufficiency_pct : null);
+            const ls_self = months.map(m => m.lstm ? m.lstm.self_sufficiency_pct : null);
+            const rb_soc  = months.map(m => m.rb ? m.rb.soc_avg_pct : null);
+            const ls_soc  = months.map(m => m.lstm ? m.lstm.soc_avg_pct : null);
+            const rb_cyc  = months.map(m => m.rb ? m.rb.cycle_count : null);
+            const ls_cyc  = months.map(m => m.lstm ? m.lstm.cycle_count : null);
+            const rb_sav  = months.map(m => m.rb ? m.rb.cost_saving_won : null);
+            const ls_sav  = months.map(m => m.lstm ? m.lstm.cost_saving_won : null);
+            
+            // 정보 박스 업데이트
+            if (infoBox) {
+                const rbMonths = data.rb_total_months || 0;
+                const lstmMonths = data.lstm_total_months || 0;
+                const commonMonths = (data.common_months || []).length;
+                infoBox.innerHTML = `월별 비교 그래프 (RB: ${rbMonths}개월, LSTM: ${lstmMonths}개월, 공통: ${commonMonths}개월)`;
+            }
+            
+            // 4개 차트 공통 옵션
+            const commonOpts = {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', font: { size: 11 }, boxWidth: 14 } },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: false,
+                        grid: { color: 'rgba(51, 65, 85, 0.3)' }, 
+                        ticks: { color: '#94a3b8', font: { size: 10 } } 
+                    },
+                    x: { 
+                        grid: { color: 'rgba(51, 65, 85, 0.2)' }, 
+                        ticks: { color: '#94a3b8', font: { size: 10 } } 
                     }
-                    
-                    const diffStr = m.label.includes('원') 
-                        ? `${diff >= 0 ? '+' : ''}${Math.round(diff).toLocaleString()}`
-                        : `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}`;
-                    
-                    tbody.innerHTML += `<tr>
-                        <td></td>
-                        <td style="text-align: left; color: #94a3b8;">${m.label}</td>
-                        <td class="${lstmClass}">${m.fmt(lstmVal)}</td>
-                        <td class="${rbClass}">${m.fmt(rbVal)}</td>
-                        <td>${diffStr}</td>
-                        <td style="color: ${winner === 'LSTM' ? '#3b82f6' : winner === 'Rule-Based' ? '#10b981' : '#94a3b8'};">${winner}</td>
-                    </tr>`;
+                }
+            };
+            
+            function makeChart(canvasId, lstmData, rbData) {
+                const ctx = document.getElementById(canvasId).getContext('2d');
+                return new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets: [
+                        { label: 'LSTM', data: lstmData, 
+                          borderColor: '#3b82f6', 
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)', 
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4,
+                          spanGaps: true },
+                        { label: 'Rule-Based', data: rbData, 
+                          borderColor: '#10b981', 
+                          backgroundColor: 'rgba(16, 185, 129, 0.1)', 
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4,
+                          spanGaps: true },
+                    ]},
+                    options: commonOpts
                 });
-            });
+            }
+            
+            comparisonCharts.selfSuff = makeChart('comparisonSelfSuffChart', ls_self, rb_self);
+            comparisonCharts.soc      = makeChart('comparisonSocChart',      ls_soc,  rb_soc);
+            comparisonCharts.cycle    = makeChart('comparisonCycleChart',    ls_cyc,  rb_cyc);
+            comparisonCharts.saving   = makeChart('comparisonSavingChart',   ls_sav,  rb_sav);
         }
         // ===== 비교 모달 끝 =====
+
 
         function renderPowerFlowStats(data) {
             if (data.length === 0) {
@@ -1921,57 +2252,95 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (el('total-load')) el('total-load').textContent = (data.total_load_kwh || 0).toFixed(2);
         }
 
-        // 비교 표 - 시간별 평균값 (1시간당 1개 행)
+        // 페이지 메인 1년치 비교 표시
         function updateComparison() {
-            fetch('/api/comparison?hours=168').then(r => r.json()).then(res => {
-                const data = res.data || [];
-                if (data.length === 0) {
-                    document.getElementById('comparison-table').innerHTML = '<p style="text-align: center; color: #64748b; padding: 20px;">아직 비교 데이터가 없습니다.<br>1시간마다 자동 수집됩니다.</p>';
-                    return;
-                }
+            fetch('/api/yearly-comparison').then(r => r.json()).then(data => {
+                renderYearlyMainView(data);
+            }).catch(e => {
+                document.getElementById('yearly-comparison-table').innerHTML = 
+                    '<p style="text-align: center; color: #ef4444; padding: 20px;">로드 실패: ' + e.message + '</p>';
+            });
+        }
+
+        function renderYearlyMainView(data) {
+            if (!data || !data.available) {
+                document.getElementById('yearly-summary-stats').innerHTML = '';
+                document.getElementById('yearly-comparison-table').innerHTML = 
+                    '<p style="text-align: center; color: #64748b; padding: 20px;">' + 
+                    (data.message || '비교 데이터가 없습니다.') + 
+                    '<br><br>compare.py를 실행한 후 다시 확인하세요.</p>';
+                return;
+            }
+            
+            // 종합 우위 카드 (4개)
+            const summary = data.summary || {};
+            document.getElementById('yearly-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Rule-Based 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체 지표</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
+            
+            // 핵심 지표 표
+            const keyMetrics = [
+                { cat: 'economic',  key: 'cost_saving_won',         label: '연 절감액' },
+                { cat: 'economic',  key: 'cost_saving_rate_pct',    label: '절감률' },
+                { cat: 'economic',  key: 'peak_saving_rate_pct',    label: '피크 절감률' },
+                { cat: 'energy',    key: 'self_sufficiency_pct',    label: '자립률' },
+                { cat: 'energy',    key: 'bess_utilization_pct',    label: 'BESS 활용률' },
+                { cat: 'energy',    key: 'bess_discharge_kwh',      label: 'BESS 방전 공급' },
+                { cat: 'stability', key: 'control_success_rate_pct',label: '제어 성공률' },
+                { cat: 'stability', key: 'cycle_count',             label: '배터리 사이클' },
+            ];
+            
+            let html = '<table>';
+            html += `<tr>
+                <th class="metric-name">핵심 지표</th>
+                <th style="color: #3b82f6;">LSTM</th>
+                <th style="color: #10b981;">Rule-Based</th>
+                <th>우위</th>
+            </tr>`;
+            
+            keyMetrics.forEach(m => {
+                const entries = data[m.cat] || [];
+                const entry = entries.find(e => e.metric_key === m.key);
+                if (!entry) return;
                 
-                let html = `<table>
-                    <tr>
-                        <th>시간</th>
-                        <th>지표</th>
-                        <th class="lstm">LSTM</th>
-                        <th class="rb">Rule-Based</th>
-                    </tr>`;
+                const lstmStr = formatYearlyValue(entry.lstm, entry.fmt) + (entry.unit ? ' ' + entry.unit : '');
+                const rbStr   = formatYearlyValue(entry.rb,   entry.fmt) + (entry.unit ? ' ' + entry.unit : '');
                 
-                // 최신 시간 데이터부터 표시 (역순)
-                const reversedData = [...data].reverse();
-                reversedData.forEach((entry) => {
-                    const ts = new Date(entry.timestamp);
-                    const timeStr = `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
-                    
-                    const metrics = [
-                        { label: 'SOC (%)', lstm: 'soc', rb: 'soc', fmt: (v) => v.toFixed(1) },
-                        { label: '자립률 (%)', lstm: 'self_sufficiency', rb: 'self_sufficiency', fmt: (v) => v.toFixed(1) },
-                        { label: '사이클', lstm: 'cycle', rb: 'cycle', fmt: (v) => v.toFixed(2) },
-                        { label: '절감액 (원)', lstm: 'cost_saving', rb: 'cost_saving', fmt: (v) => Math.round(v).toLocaleString() },
-                    ];
-                    
-                    // 시간 헤더 행
-                    html += `<tr class="hour-row">
-                        <td colspan="4" class="hour-cell">${timeStr} (평균 ${entry.sample_count || 1}개)</td>
-                    </tr>`;
-                    
-                    metrics.forEach((m) => {
-                        const lstmVal = entry.lstm[m.lstm] || 0;
-                        const rbVal = entry.rb[m.rb] || 0;
-                        const isBetterLstm = lstmVal > rbVal;
-                        html += `<tr>
-                            <td></td>
-                            <td class="metric-name">${m.label}</td>
-                            <td class="${isBetterLstm ? 'better' : ''}">${m.fmt(lstmVal)}</td>
-                            <td class="${!isBetterLstm ? 'better' : ''}">${m.fmt(rbVal)}</td>
-                        </tr>`;
-                    });
-                });
+                let winnerText = '-';
+                let winnerColor = '#94a3b8';
+                let lstmClass = '';
+                let rbClass = '';
+                if (entry.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                else if (entry.winner === 'rb') { winnerText = 'Rule-Based'; winnerColor = '#10b981'; rbClass = 'better'; }
+                else if (entry.winner === 'equal') { winnerText = '동일'; }
                 
-                html += '</table>';
-                document.getElementById('comparison-table').innerHTML = html;
-            }).catch(e => {});
+                html += `<tr>
+                    <td class="metric-name">${m.label}</td>
+                    <td class="${lstmClass}">${lstmStr}</td>
+                    <td class="${rbClass}">${rbStr}</td>
+                    <td style="color: ${winnerColor}; font-weight: 600;">${winnerText}</td>
+                </tr>`;
+            });
+            
+            html += '</table>';
+            html += '<p style="text-align: center; color: #64748b; font-size: 0.85em; margin-top: 10px;">📊 2025년 1년치 시뮬레이션 결과 · 상세 보기로 전체 지표 확인</p>';
+            
+            document.getElementById('yearly-comparison-table').innerHTML = html;
         }
 
         function initChart() {
@@ -2429,15 +2798,22 @@ MOBILE_HTML = """<!DOCTYPE html>
                 </div>
             </div>
             
-            <!-- 페이지 4: Rule-Based vs LSTM 비교 -->
+            <!-- 페이지 4: Rule-Based vs LSTM 1년치 비교 -->
             <div class="page" id="page-4">
-                <div class="full-chart-section">
+                <div class="full-chart-section" style="overflow-y: auto;">
                     <div class="section-title">
-                        <span>Rule-Based vs LSTM 비교</span>
+                        <span>Rule-Based vs LSTM 비교 (1년치 시뮬레이션)</span>
                         <button class="detail-btn" onclick="openComparisonModal()">상세 보기 ↗</button>
                     </div>
-                    <div class="comparison-table" id="comparison-table">
-                        <p style="text-align: center; color: #64748b; padding: 20px;">데이터 수집 중...</p>
+                    
+                    <!-- 우위 종합 카드 -->
+                    <div class="stats-grid" id="yearly-summary-stats" style="margin-bottom: 8px;">
+                        <p style="grid-column: span 4; text-align: center; color: #64748b; padding: 10px;">데이터 로드 중...</p>
+                    </div>
+                    
+                    <!-- 핵심 지표 비교 표 -->
+                    <div id="yearly-comparison-table" style="overflow-y: auto; flex: 1; min-height: 0;">
+                        <p style="text-align: center; color: #64748b; padding: 20px;">데이터 로드 중...</p>
                     </div>
                 </div>
             </div>
@@ -2547,43 +2923,41 @@ MOBILE_HTML = """<!DOCTYPE html>
             <div class="modal-header">
                 <div>
                     <div class="modal-title">Rule-Based vs LSTM 성능 비교</div>
-                    <div class="modal-subtitle">시간별 성능 추이 및 종합 분석</div>
+                    <div class="modal-subtitle">1년치 시뮬레이션 결과 상세 분석</div>
                 </div>
                 <button class="close-btn" onclick="closeComparisonModal()">X</button>
             </div>
+            
+            <!-- 종합 우위 카드 -->
             <div class="stats-grid" id="comparison-summary-stats"></div>
+            
+            <!-- 월별 비교 그래프 4개 -->
+            <div id="monthly-charts-info" class="info-box" style="margin-top: 8px;">
+                월별 비교 그래프 (2025년 시뮬레이션 데이터)
+            </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-                <div class="modal-chart-container" style="height: 170px;">
+                <div class="modal-chart-container" style="height: 180px;">
                     <div class="comparison-chart-title">자립률 추이 (%)</div>
                     <canvas id="comparisonSelfSuffChart"></canvas>
                 </div>
-                <div class="modal-chart-container" style="height: 170px;">
-                    <div class="comparison-chart-title">SOC 추이 (%)</div>
+                <div class="modal-chart-container" style="height: 180px;">
+                    <div class="comparison-chart-title">평균 SOC 추이 (%)</div>
                     <canvas id="comparisonSocChart"></canvas>
                 </div>
-                <div class="modal-chart-container" style="height: 170px;">
-                    <div class="comparison-chart-title">배터리 사이클 (회)</div>
+                <div class="modal-chart-container" style="height: 180px;">
+                    <div class="comparison-chart-title">월별 배터리 사이클 (회)</div>
                     <canvas id="comparisonCycleChart"></canvas>
                 </div>
-                <div class="modal-chart-container" style="height: 170px;">
-                    <div class="comparison-chart-title">절감액 (원)</div>
+                <div class="modal-chart-container" style="height: 180px;">
+                    <div class="comparison-chart-title">월별 절감액 (원)</div>
                     <canvas id="comparisonSavingChart"></canvas>
                 </div>
             </div>
-            <div class="info-box">시간별 LSTM과 Rule-Based 성능 비교. 더 좋은 값은 초록색.</div>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>시간</th>
-                        <th>지표</th>
-                        <th style="color: #3b82f6;">LSTM</th>
-                        <th style="color: #10b981;">Rule-Based</th>
-                        <th>차이</th>
-                        <th>우위</th>
-                    </tr>
-                </thead>
-                <tbody id="comparison-modal-tbody"></tbody>
-            </table>
+            
+            <!-- 카테고리별 상세 비교 -->
+            <div id="yearly-detail-container">
+                <p style="text-align: center; color: #64748b; padding: 20px;">데이터 로드 중...</p>
+            </div>
         </div>
     </div>
 
@@ -2985,20 +3359,32 @@ MOBILE_HTML = """<!DOCTYPE html>
             });
         }
 
-        // ============ Rule-Based vs LSTM 비교 모달 ============
+        // ============ Rule-Based vs LSTM 비교 모달 (1년치 진짜 데이터) ============
+        let yearlyDataCache = null;
+        
         function openComparisonModal() {
             document.getElementById('comparison-modal').classList.add('active');
             const modalContent = document.getElementById('comparison-modal-content');
             modalContent.scrollTop = 0;
-            fetch('/api/comparison?hours=168').then(r => r.json()).then(res => {
-                const data = res.data || [];
-                renderComparisonSummary(data);
-                renderComparisonTable(data);
+            
+            // 1. 1년치 종합 비교 (표)
+            fetch('/api/yearly-comparison').then(r => r.json()).then(res => {
+                yearlyDataCache = res;
+                renderYearlyModalContent(res);
+            }).catch(e => {
+                document.getElementById('yearly-detail-container').innerHTML = 
+                    '<p style="text-align: center; color: #ef4444; padding: 20px;">데이터 로드 실패: ' + e.message + '</p>';
+            });
+            
+            // 2. 월별 비교 (그래프 4개)
+            fetch('/api/monthly-comparison').then(r => r.json()).then(res => {
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        setTimeout(() => { renderComparisonCharts(data); }, 200);
+                        setTimeout(() => { renderMonthlyCharts(res); }, 200);
                     });
                 });
+            }).catch(e => {
+                console.error('월별 데이터 로드 실패:', e);
             });
         }
         function closeComparisonModal() {
@@ -3009,104 +3395,298 @@ MOBILE_HTML = """<!DOCTYPE html>
         }
         function closeComparisonModalOnOverlay(e) { if (e.target.id === 'comparison-modal') closeComparisonModal(); }
 
-        function renderComparisonSummary(data) {
-            if (data.length === 0) {
-                document.getElementById('comparison-summary-stats').innerHTML = '<p style="grid-column: span 4; text-align: center; color: #64748b; padding: 20px;">아직 비교 데이터가 없습니다</p>';
-                return;
-            }
-            let lstmWins = 0, rbWins = 0, equals = 0;
-            const latest = data[data.length - 1];
-            const metrics = [
-                { lstm: latest.lstm.soc, rb: latest.rb.soc, higherBetter: true },
-                { lstm: latest.lstm.self_sufficiency, rb: latest.rb.self_sufficiency, higherBetter: true },
-                { lstm: latest.lstm.cycle, rb: latest.rb.cycle, higherBetter: null },
-                { lstm: latest.lstm.cost_saving, rb: latest.rb.cost_saving, higherBetter: true },
-            ];
-            metrics.forEach(m => {
-                const diff = m.lstm - m.rb;
-                if (m.higherBetter === null) equals += 1;
-                else if (Math.abs(diff) < 0.01) equals += 1;
-                else if ((m.higherBetter && diff > 0) || (!m.higherBetter && diff < 0)) lstmWins += 1;
-                else rbWins += 1;
-            });
-            document.getElementById('comparison-summary-stats').innerHTML = `
-                <div class="stat-card"><div class="stat-label">LSTM 우위</div><div class="stat-value" style="color: #3b82f6;">${lstmWins}개</div></div>
-                <div class="stat-card"><div class="stat-label">Rule-Based 우위</div><div class="stat-value" style="color: #10b981;">${rbWins}개</div></div>
-                <div class="stat-card"><div class="stat-label">동일</div><div class="stat-value" style="color: #94a3b8;">${equals}개</div></div>
-                <div class="stat-card"><div class="stat-label">수집 시간</div><div class="stat-value" style="color: #f59e0b;">${data.length}h</div></div>
-            `;
-        }
-
-        function makeComparisonChartConfig(label, lstmData, rbData, labels, unit) {
-            return {
-                type: 'line',
-                data: { labels, datasets: [
-                    { label: 'LSTM', data: lstmData, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 2 },
-                    { label: 'Rule-Based', data: rbData, borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 2 },
-                ]},
-                options: { responsive: true, maintainAspectRatio: false,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 10 } } },
-                               tooltip: { mode: 'index', intersect: false } },
-                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', font: { size: 9 } } },
-                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', font: { size: 8 }, maxTicksLimit: 6 } } }
-                }
-            };
-        }
-
-        function renderComparisonCharts(data) {
+        // 월별 그래프 4개 렌더링
+        function renderMonthlyCharts(data) {
+            // 기존 차트 제거
             Object.keys(comparisonCharts).forEach(key => {
                 if (comparisonCharts[key]) { comparisonCharts[key].destroy(); comparisonCharts[key] = null; }
             });
-            if (data.length === 0) return;
-            const labels = data.map(d => {
-                const ts = new Date(d.timestamp);
-                return `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
-            });
-            comparisonCharts.selfSuff = new Chart(document.getElementById('comparisonSelfSuffChart').getContext('2d'),
-                makeComparisonChartConfig('자립률', data.map(d => d.lstm.self_sufficiency), data.map(d => d.rb.self_sufficiency), labels, '%'));
-            comparisonCharts.soc = new Chart(document.getElementById('comparisonSocChart').getContext('2d'),
-                makeComparisonChartConfig('SOC', data.map(d => d.lstm.soc), data.map(d => d.rb.soc), labels, '%'));
-            comparisonCharts.cycle = new Chart(document.getElementById('comparisonCycleChart').getContext('2d'),
-                makeComparisonChartConfig('사이클', data.map(d => d.lstm.cycle), data.map(d => d.rb.cycle), labels, '회'));
-            comparisonCharts.saving = new Chart(document.getElementById('comparisonSavingChart').getContext('2d'),
-                makeComparisonChartConfig('절감액', data.map(d => d.lstm.cost_saving), data.map(d => d.rb.cost_saving), labels, '원'));
-        }
-
-        function renderComparisonTable(data) {
-            const tbody = document.getElementById('comparison-modal-tbody');
-            tbody.innerHTML = '';
-            if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 20px;">데이터 없음</td></tr>';
+            
+            const infoBox = document.getElementById('monthly-charts-info');
+            
+            if (!data || !data.available) {
+                if (infoBox) {
+                    infoBox.innerHTML = '⚠️ ' + (data.message || '월별 데이터 없음') +
+                        '<br><span style="font-size: 0.85em; color: #94a3b8;">시뮬레이션 CSV 파일이 필요합니다.</span>';
+                }
                 return;
             }
-            const reversedData = [...data].reverse();
-            reversedData.forEach((entry) => {
-                const ts = new Date(entry.timestamp);
-                const timeStr = `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
-                const metrics = [
-                    { label: 'SOC (%)', lstm: 'soc', rb: 'soc', fmt: (v) => v.toFixed(1), higherBetter: true },
-                    { label: '자립률 (%)', lstm: 'self_sufficiency', rb: 'self_sufficiency', fmt: (v) => v.toFixed(1), higherBetter: true },
-                    { label: '사이클', lstm: 'cycle', rb: 'cycle', fmt: (v) => v.toFixed(2), higherBetter: null },
-                    { label: '절감액 (원)', lstm: 'cost_saving', rb: 'cost_saving', fmt: (v) => Math.round(v).toLocaleString(), higherBetter: true },
-                ];
-                tbody.innerHTML += `<tr style="background: rgba(59, 130, 246, 0.1);"><td colspan="6" style="padding: 5px 8px; font-weight: 500; color: #cbd5e1;">${timeStr} (샘플 ${entry.sample_count || 1}개)</td></tr>`;
-                metrics.forEach((m) => {
-                    const lstmVal = entry.lstm[m.lstm] || 0;
-                    const rbVal = entry.rb[m.rb] || 0;
-                    const diff = lstmVal - rbVal;
-                    let winner = '', lstmClass = '', rbClass = '';
-                    if (m.higherBetter === null) winner = '-';
-                    else if (Math.abs(diff) < 0.01) winner = '동일';
-                    else if ((m.higherBetter && diff > 0) || (!m.higherBetter && diff < 0)) { winner = 'LSTM'; lstmClass = 'better'; }
-                    else { winner = 'Rule-Based'; rbClass = 'better'; }
-                    const diffStr = m.label.includes('원')
-                        ? `${diff >= 0 ? '+' : ''}${Math.round(diff).toLocaleString()}`
-                        : `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}`;
-                    tbody.innerHTML += `<tr><td></td><td style="text-align: left; color: #94a3b8;">${m.label}</td><td class="${lstmClass}">${m.fmt(lstmVal)}</td><td class="${rbClass}">${m.fmt(rbVal)}</td><td>${diffStr}</td><td style="color: ${winner === 'LSTM' ? '#3b82f6' : winner === 'Rule-Based' ? '#10b981' : '#94a3b8'};">${winner}</td></tr>`;
+            
+            const months = data.months || [];
+            if (months.length === 0) {
+                if (infoBox) infoBox.innerHTML = '월별 데이터 없음';
+                return;
+            }
+            
+            // 데이터 추출
+            const labels = months.map(m => m.month_label);
+            const rb_self = months.map(m => m.rb ? m.rb.self_sufficiency_pct : null);
+            const ls_self = months.map(m => m.lstm ? m.lstm.self_sufficiency_pct : null);
+            const rb_soc  = months.map(m => m.rb ? m.rb.soc_avg_pct : null);
+            const ls_soc  = months.map(m => m.lstm ? m.lstm.soc_avg_pct : null);
+            const rb_cyc  = months.map(m => m.rb ? m.rb.cycle_count : null);
+            const ls_cyc  = months.map(m => m.lstm ? m.lstm.cycle_count : null);
+            const rb_sav  = months.map(m => m.rb ? m.rb.cost_saving_won : null);
+            const ls_sav  = months.map(m => m.lstm ? m.lstm.cost_saving_won : null);
+            
+            // 정보 박스 업데이트
+            if (infoBox) {
+                const rbMonths = data.rb_total_months || 0;
+                const lstmMonths = data.lstm_total_months || 0;
+                const commonMonths = (data.common_months || []).length;
+                infoBox.innerHTML = `월별 비교 그래프 (RB: ${rbMonths}개월, LSTM: ${lstmMonths}개월, 공통: ${commonMonths}개월)`;
+            }
+            
+            // 4개 차트 공통 옵션
+            const commonOpts = {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', font: { size: 10 }, boxWidth: 12 } },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: false,
+                        grid: { color: 'rgba(51, 65, 85, 0.3)' }, 
+                        ticks: { color: '#94a3b8', font: { size: 9 } } 
+                    },
+                    x: { 
+                        grid: { color: 'rgba(51, 65, 85, 0.2)' }, 
+                        ticks: { color: '#94a3b8', font: { size: 9 } } 
+                    }
+                }
+            };
+            
+            function makeChart(canvasId, lstmData, rbData) {
+                const ctx = document.getElementById(canvasId).getContext('2d');
+                return new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets: [
+                        { label: 'LSTM', data: lstmData, 
+                          borderColor: '#3b82f6', 
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)', 
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3,
+                          spanGaps: true },
+                        { label: 'Rule-Based', data: rbData, 
+                          borderColor: '#10b981', 
+                          backgroundColor: 'rgba(16, 185, 129, 0.1)', 
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3,
+                          spanGaps: true },
+                    ]},
+                    options: commonOpts
                 });
+            }
+            
+            comparisonCharts.selfSuff = makeChart('comparisonSelfSuffChart', ls_self, rb_self);
+            comparisonCharts.soc      = makeChart('comparisonSocChart',      ls_soc,  rb_soc);
+            comparisonCharts.cycle    = makeChart('comparisonCycleChart',    ls_cyc,  rb_cyc);
+            comparisonCharts.saving   = makeChart('comparisonSavingChart',   ls_sav,  rb_sav);
+        }
+
+        // 숫자 포맷 (원/정수/소수)
+        function formatYearlyValue(val, fmt) {
+            if (val === null || val === undefined) return '-';
+            if (fmt === 'int') return Math.round(val).toLocaleString();
+            if (fmt === 'float2') return val.toFixed(2);
+            if (fmt === 'float3') return val.toFixed(3);
+            return val.toString();
+        }
+
+        // 모달: 카테고리별 상세 비교 렌더링
+        function renderYearlyModalContent(data) {
+            if (!data || !data.available) {
+                document.getElementById('comparison-summary-stats').innerHTML = 
+                    '<p style="grid-column: span 4; text-align: center; color: #64748b; padding: 20px;">' + 
+                    (data.message || '비교 데이터 없음') + '</p>';
+                document.getElementById('yearly-detail-container').innerHTML = '';
+                return;
+            }
+            
+            // 종합 우위 카드
+            const summary = data.summary || {};
+            document.getElementById('comparison-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Rule-Based 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체 지표</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
+            
+            // 카테고리별 표
+            const categories = [
+                { key: 'economic',          title: '1. 경제적 효율' },
+                { key: 'economic_breakdown',title: '2. 시간대별 절감 (경부/중간/최대)' },
+                { key: 'energy',            title: '3. 에너지 효율' },
+                { key: 'stability',         title: '4. 운영 안정성' },
+                { key: 'prediction',        title: '5. LSTM 예측 성능' },
+            ];
+            
+            let html = '<div class="info-box">2025년 1년치 시뮬레이션 결과 비교. 더 좋은 값은 초록색으로 표시됩니다.</div>';
+            
+            categories.forEach(cat => {
+                const entries = data[cat.key] || [];
+                if (entries.length === 0) return;
+                
+                html += `<div style="margin-bottom: 16px;">
+                    <div style="font-size: 0.9em; color: #3b82f6; font-weight: 600; margin-bottom: 6px; padding: 4px 8px; background: rgba(59,130,246,0.1); border-radius: 4px;">
+                        ${cat.title}
+                    </div>
+                    <table class="data-table" style="margin-bottom: 4px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left;">지표</th>
+                                <th style="color: #3b82f6;">LSTM</th>
+                                <th style="color: #10b981;">Rule-Based</th>
+                                <th>차이</th>
+                                <th>우위</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                
+                entries.forEach(e => {
+                    const lstmStr = formatYearlyValue(e.lstm, e.fmt) + (e.unit ? ' ' + e.unit : '');
+                    const rbStr   = formatYearlyValue(e.rb,   e.fmt) + (e.unit ? ' ' + e.unit : '');
+                    
+                    let diffStr = '-';
+                    if (e.diff !== null && e.diff !== undefined) {
+                        const sign = e.diff >= 0 ? '+' : '';
+                        if (e.fmt === 'int') {
+                            diffStr = sign + Math.round(e.diff).toLocaleString();
+                        } else if (e.fmt === 'float3') {
+                            diffStr = sign + e.diff.toFixed(3);
+                        } else {
+                            diffStr = sign + e.diff.toFixed(2);
+                        }
+                    }
+                    
+                    let winnerText = '-';
+                    let winnerColor = '#94a3b8';
+                    let lstmClass = '';
+                    let rbClass = '';
+                    if (e.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                    else if (e.winner === 'rb') { winnerText = 'Rule-Based'; winnerColor = '#10b981'; rbClass = 'better'; }
+                    else if (e.winner === 'equal') { winnerText = '동일'; }
+                    
+                    html += `<tr>
+                        <td style="text-align: left; color: #cbd5e1;">${e.name}</td>
+                        <td class="${lstmClass}">${lstmStr}</td>
+                        <td class="${rbClass}">${rbStr}</td>
+                        <td>${diffStr}</td>
+                        <td style="color: ${winnerColor};">${winnerText}</td>
+                    </tr>`;
+                });
+                
+                html += '</tbody></table></div>';
+            });
+            
+            document.getElementById('yearly-detail-container').innerHTML = html;
+        }
+
+        // ============ 페이지 4: 1년치 비교 요약 (메인 화면) ============
+        function updateComparison() {
+            fetch('/api/yearly-comparison').then(r => r.json()).then(data => {
+                renderYearlyMainView(data);
+            }).catch(e => {
+                document.getElementById('yearly-comparison-table').innerHTML = 
+                    '<p style="text-align: center; color: #ef4444; padding: 20px;">로드 실패: ' + e.message + '</p>';
             });
         }
+
+        function renderYearlyMainView(data) {
+            if (!data || !data.available) {
+                document.getElementById('yearly-summary-stats').innerHTML = '';
+                document.getElementById('yearly-comparison-table').innerHTML = 
+                    '<p style="text-align: center; color: #64748b; padding: 20px;">' + 
+                    (data.message || '비교 데이터가 없습니다.') + 
+                    '<br><br>compare.py를 실행한 후 다시 확인하세요.</p>';
+                return;
+            }
+            
+            // 종합 우위 (페이지 상단 4개 카드)
+            const summary = data.summary || {};
+            document.getElementById('yearly-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">RB 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
+            
+            // 핵심 지표만 간략 표시 (페이지 4에서)
+            const keyMetrics = [
+                { cat: 'economic', key: 'cost_saving_won', label: '연 절감액' },
+                { cat: 'economic', key: 'cost_saving_rate_pct', label: '절감률' },
+                { cat: 'economic', key: 'peak_saving_rate_pct', label: '피크 절감률' },
+                { cat: 'energy',   key: 'self_sufficiency_pct', label: '자립률' },
+                { cat: 'energy',   key: 'bess_utilization_pct', label: 'BESS 활용률' },
+                { cat: 'energy',   key: 'bess_discharge_kwh', label: 'BESS 방전 공급' },
+                { cat: 'stability',key: 'control_success_rate_pct', label: '제어 성공률' },
+                { cat: 'stability',key: 'cycle_count', label: '배터리 사이클' },
+            ];
+            
+            let html = '<table style="width: 100%; font-size: 0.75em;">';
+            html += `<tr>
+                <th style="text-align: left;">핵심 지표</th>
+                <th style="color: #3b82f6;">LSTM</th>
+                <th style="color: #10b981;">RB</th>
+                <th>우위</th>
+            </tr>`;
+            
+            keyMetrics.forEach(m => {
+                const entries = data[m.cat] || [];
+                const entry = entries.find(e => e.metric_key === m.key);
+                if (!entry) return;
+                
+                const lstmStr = formatYearlyValue(entry.lstm, entry.fmt) + 
+                                (entry.unit ? ' ' + entry.unit : '');
+                const rbStr = formatYearlyValue(entry.rb, entry.fmt) + 
+                              (entry.unit ? ' ' + entry.unit : '');
+                
+                let winnerText = '-';
+                let winnerColor = '#94a3b8';
+                let lstmClass = '';
+                let rbClass = '';
+                if (entry.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                else if (entry.winner === 'rb') { winnerText = 'RB'; winnerColor = '#10b981'; rbClass = 'better'; }
+                else if (entry.winner === 'equal') { winnerText = '='; }
+                
+                html += `<tr>
+                    <td style="text-align: left; color: #cbd5e1; padding: 6px 4px;">${m.label}</td>
+                    <td class="${lstmClass}" style="padding: 6px 4px;">${lstmStr}</td>
+                    <td class="${rbClass}" style="padding: 6px 4px;">${rbStr}</td>
+                    <td style="color: ${winnerColor}; padding: 6px 4px; font-weight: 600;">${winnerText}</td>
+                </tr>`;
+            });
+            
+            html += '</table>';
+            html += '<p style="text-align: center; color: #64748b; font-size: 0.7em; margin-top: 8px;">📊 2025년 1년치 시뮬레이션 결과 · 상세 보기로 전체 지표 확인</p>';
+            
+            document.getElementById('yearly-comparison-table').innerHTML = html;
+        }
+
 
         // ============ ESC 키로 모달 닫기 ============
         document.addEventListener('keydown', (e) => {
@@ -3170,36 +3750,7 @@ MOBILE_HTML = """<!DOCTYPE html>
             if (el('total-load')) el('total-load').textContent = (data.total_load_kwh || 0).toFixed(2);
         }
 
-        function updateComparison() {
-            fetch('/api/comparison?hours=168').then(r => r.json()).then(res => {
-                const data = res.data || [];
-                if (data.length === 0) {
-                    document.getElementById('comparison-table').innerHTML = '<p style="text-align: center; color: #64748b; padding: 20px;">아직 비교 데이터가 없습니다.<br>1시간마다 자동 수집됩니다.</p>';
-                    return;
-                }
-                let html = `<table><tr><th>시간</th><th>지표</th><th class="lstm">LSTM</th><th class="rb">Rule-Based</th></tr>`;
-                const reversedData = [...data].reverse();
-                reversedData.forEach((entry) => {
-                    const ts = new Date(entry.timestamp);
-                    const timeStr = `${ts.getMonth()+1}/${ts.getDate()} ${String(ts.getHours()).padStart(2,'0')}:00`;
-                    const metrics = [
-                        { label: 'SOC (%)', lstm: 'soc', rb: 'soc', fmt: (v) => v.toFixed(1) },
-                        { label: '자립률 (%)', lstm: 'self_sufficiency', rb: 'self_sufficiency', fmt: (v) => v.toFixed(1) },
-                        { label: '사이클', lstm: 'cycle', rb: 'cycle', fmt: (v) => v.toFixed(2) },
-                        { label: '절감액 (원)', lstm: 'cost_saving', rb: 'cost_saving', fmt: (v) => Math.round(v).toLocaleString() },
-                    ];
-                    html += `<tr class="hour-row"><td colspan="4" class="hour-cell">${timeStr} (평균 ${entry.sample_count || 1}개)</td></tr>`;
-                    metrics.forEach((m) => {
-                        const lstmVal = entry.lstm[m.lstm] || 0;
-                        const rbVal = entry.rb[m.rb] || 0;
-                        const isBetterLstm = lstmVal > rbVal;
-                        html += `<tr><td></td><td class="metric-name">${m.label}</td><td class="${isBetterLstm ? 'better' : ''}">${m.fmt(lstmVal)}</td><td class="${!isBetterLstm ? 'better' : ''}">${m.fmt(rbVal)}</td></tr>`;
-                    });
-                });
-                html += '</table>';
-                document.getElementById('comparison-table').innerHTML = html;
-            }).catch(e => {});
-        }
+        // (옛 updateComparison 함수 제거됨 - 라인 3578의 새 1년치 비교 버전을 사용)
 
         function initChart() {
             const ctx = document.getElementById('powerChart').getContext('2d');
@@ -3243,10 +3794,16 @@ MOBILE_HTML = """<!DOCTYPE html>
             if (currentPage === 3) updateChart();
         }, 10000);
 
+        // 페이지 4 1년치 비교 데이터는 변하지 않으므로 5초마다 새로고침 시도 (실패 대비)
+        setInterval(() => {
+            if (currentPage === 4) updateComparison();
+        }, 5000);
+
         window.addEventListener('load', () => {
             renderCards(1);
             fetch('/api/status').then(r => r.json()).then(updateMetrics);
             fetch('/api/daily-stats').then(r => r.json()).then(updateStats);
+            updateComparison();   // 페이지 4 데이터 즉시 로드
         });
     </script>
 </body>

@@ -16,10 +16,8 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
-    # 프로젝트 루트의 .env 파일 로드
     env_path = Path(__file__).parent / '.env'
     if not env_path.exists():
-        # DL_LSTM 하위에서 실행 시 상위 폴더의 .env도 확인
         env_path = Path(__file__).parent.parent / '.env'
     load_dotenv(dotenv_path=env_path)
 except ImportError:
@@ -40,10 +38,27 @@ TARGET_SOC_MIN    = 0.20
 TARGET_SOC_MAX    = 0.80
 
 # =====================================================================
-# 태양광 사양
+# 태양광 설비 사양 (서울 강동구 도시기반시설본부 실제 사례 + 한화큐셀 Q.PEAK DUO 기준)
 # =====================================================================
-PV_CAPACITY_KW = 50.0
-PV_EFFICIENCY  = 0.18
+PV_CAPACITY_KW    = 50.0     # PCS 용량 (강동구 도시기반시설본부와 동일)
+PV_EFFICIENCY     = 0.21     # 모듈 효율 (한국 표준 단결정 PERC)
+
+# 설치 조건 (한국 표준)
+PV_AZIMUTH        = 180.0    # 방위각: 정남향
+PV_TILT           = 30.0     # 경사각 (서울 위도 37.5° 최적값)
+
+# 패널 물성치 (KS C 8526 표준)
+PV_TEMP_COEFF     = -0.0040  # 온도계수 -0.40%/°C (25°C 이탈 시)
+PV_NOCT           = 45.0     # 공칭 작동 셀온도 (°C)
+
+# 시스템 효율
+PV_PR             = 0.78     # Performance Ratio (한국 평균)
+PV_INVERTER_EFF   = 0.96     # 인버터 효율 (KS 인증 기준)
+
+# 설치 위치 (서울 강동구 도시기반시설본부)
+SITE_LATITUDE     = 37.5301
+SITE_LONGITUDE    = 127.1238
+SITE_NAME         = '서울 강동구 도시기반시설본부 (모델 시뮬레이션)'
 
 # =====================================================================
 # 시간대별 전기요금  (한국전력 산업용 갑 II / 고압A)
@@ -66,26 +81,24 @@ def get_tariff_period(hour: int) -> str:
 # 시뮬레이션 설정
 # =====================================================================
 TIME_STEP_HOURS  = 1.0
-SIMULATION_DAYS  = 30   # 가상 데이터 폴백 시에만 사용 (API 모드에선 API_START/END 가 우선)
+SIMULATION_DAYS  = 30
 
 # =====================================================================
 # LSTM 하이퍼파라미터
 # =====================================================================
-SEQ_LEN         = 24       # 입력 시퀀스 길이 (과거 24시간)
-PRED_HORIZON    = 1        # 예측 스텝 (1시간 ahead)
+SEQ_LEN         = 24
+PRED_HORIZON    = 1
 
-LSTM_HIDDEN     = 128      # LSTM 히든 유닛 수
-LSTM_LAYERS     = 2        # Stacked LSTM 레이어 수
-DROPOUT         = 0.2      # 드롭아웃 비율
+LSTM_HIDDEN     = 128
+LSTM_LAYERS     = 2
+DROPOUT         = 0.2
 LEARNING_RATE   = 1e-3
 BATCH_SIZE      = 32
 EPOCHS          = 100
-PATIENCE        = 10       # Early Stopping patience
+PATIENCE        = 10
 
-# 학습/검증/테스트 분할 비율
 TRAIN_RATIO = 0.70
 VAL_RATIO   = 0.15
-# TEST_RATIO  = 0.15 (나머지)
 
 # =====================================================================
 # 경로
@@ -102,14 +115,13 @@ TARGET_AVG_LOAD_KW = 50.0
 # =====================================================================
 # 공공 API 설정
 # =====================================================================
-# 데이터 소스 우선순위: 'api' (API 우선) | 'csv' (CSV 우선) | 'auto' (API → CSV → 가상)
 DATA_SOURCE = 'auto'
 
-# 공통 인증키 (공공데이터포털 + ODcloud)
-# ※ .env 파일에서 로드 (보안상 코드에 직접 입력하지 마세요)
 COMMON_API_KEY = os.getenv('COMMON_API_KEY', '')
 
-# API 키가 없으면 경고 출력
+# 기상청 단기예보 API 키 (.env에 별도 키 있으면 사용, 없으면 공통키 재사용)
+KMA_FORECAST_API_KEY = os.getenv('KMA_FORECAST_API_KEY', '') or COMMON_API_KEY
+
 if not COMMON_API_KEY:
     print("=" * 60)
     print("[경고] COMMON_API_KEY가 설정되지 않았습니다!")
@@ -122,27 +134,24 @@ if not COMMON_API_KEY:
     print("3. 프로그램 재시작")
     print("=" * 60)
 
-# API 엔드포인트 (URL은 공개 정보이므로 코드에 직접 명시)
-API_LOAD_URL    = 'https://api.odcloud.kr/api/15065266/v1/uddi:6ade08d2-0014-4d22-b10c-c811e3273c70'
-API_SMP_URL     = 'https://apis.data.go.kr/B552115/SmpWithForecastDemand/getSmpWithForecastDemand'
-API_WEATHER_URL = 'http://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList'
+API_LOAD_URL     = 'https://api.odcloud.kr/api/15065266/v1/uddi:6ade08d2-0014-4d22-b10c-c811e3273c70'
+API_SMP_URL      = 'https://apis.data.go.kr/B552115/SmpWithForecastDemand/getSmpWithForecastDemand'
+API_WEATHER_URL  = 'http://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList'
+API_FORECAST_URL = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst'
 
-# API 데이터 조회 기간 (None이면 SIMULATION_DAYS 기준 자동 계산)
-# ※ ODcloud 부하 데이터는 2025-01-01 ~ 2025-12-31 (totalCount 366일)
-# ※ SMP API는 1일치 = 1회 호출
-#   - 운영계정 승인: 일일 트래픽 10,000회 → 1년치(365일) 한 번에 수집 가능
 API_START_DATE = '2025-01-01'
-API_END_DATE   = '2025-12-31'   # 1년 (365일) — 4계절 모두 학습
+API_END_DATE   = '2025-12-31'
 
-# 일일 SMP API 한도 (도달 시 즉시 중단하여 다른 작업 영향 최소화)
 SMP_DAILY_QUOTA = 10000
-
-# 캐시 폴더 (API 응답 저장)
 API_CACHE_DIR = 'data/cache'
 
-# 기상 데이터 사용 여부 (피처에 일사량/구름량 추가)
-USE_WEATHER_FEATURES = False    # True 로 변경 시 기상청 API 호출
-WEATHER_STATION_ID   = 108       # 108=서울, 159=부산, 133=대전, 143=대구, 156=광주
+USE_WEATHER_FEATURES = False
+WEATHER_STATION_ID   = 108
+
+# 기상청 단기예보 격자좌표 (5km × 5km)
+# 서울 강동구 도시기반시설본부 = (62, 126)
+FORECAST_NX = 62
+FORECAST_NY = 126
 
 # =====================================================================
 # Flask 보안 키 (.env에서 로드)
