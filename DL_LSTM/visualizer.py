@@ -1,10 +1,3 @@
-"""
-visualizer.py  ─  Deep Learning BESS 시각화
-============================================
-LSTM 학습 곡선, 예측 정확도, BESS 운영 결과,
-Rule-Based vs LSTM 비교 차트를 생성합니다.
-"""
-
 import os
 import platform
 import numpy as np
@@ -16,10 +9,7 @@ _FONT_MAP = {'Windows': 'Malgun Gothic', 'Darwin': 'AppleGothic'}
 matplotlib.rc('font', family=_FONT_MAP.get(platform.system(), 'DejaVu Sans'))
 matplotlib.rcParams['axes.unicode_minus'] = False
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 1. LSTM 학습 곡선
-# ─────────────────────────────────────────────────────────────────────
 def plot_training_curve(history: dict, save_path: str = None):
     """Train / Val Loss 곡선"""
     fig, ax = plt.subplots(figsize=(9, 4))
@@ -33,10 +23,7 @@ def plot_training_curve(history: dict, save_path: str = None):
     plt.tight_layout()
     _save_or_show(save_path)
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 2. 순부하 예측 vs 실제 비교
-# ─────────────────────────────────────────────────────────────────────
 def plot_prediction(y_true: np.ndarray, y_pred: np.ndarray,
                     hours: int = 168, save_path: str = None):
     """실제 vs 예측 순부하 (기본 7일=168h)"""
@@ -65,10 +52,7 @@ def plot_prediction(y_true: np.ndarray, y_pred: np.ndarray,
     plt.tight_layout()
     _save_or_show(save_path)
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 3. 하루치 운영 그래프
-# ─────────────────────────────────────────────────────────────────────
 def plot_daily_operation(result_df: pd.DataFrame,
                           day_idx: int = 0,
                           save_path: str = None):
@@ -115,10 +99,7 @@ def plot_daily_operation(result_df: pd.DataFrame,
     plt.tight_layout()
     _save_or_show(save_path)
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 4. SOC 추세
-# ─────────────────────────────────────────────────────────────────────
 def plot_soc_trend(result_df: pd.DataFrame, save_path: str = None):
     fig, ax = plt.subplots(figsize=(14, 4))
     ax.plot(result_df['timestamp'], result_df['soc'] * 100,
@@ -138,9 +119,7 @@ def plot_soc_trend(result_df: pd.DataFrame, save_path: str = None):
     _save_or_show(save_path)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 5. Rule-Based vs LSTM 종합 비교 차트
-# ─────────────────────────────────────────────────────────────────────
 def plot_comparison(rb_metrics: dict, lstm_metrics: dict,
                     save_path: str = None):
     """
@@ -199,9 +178,7 @@ def plot_comparison(rb_metrics: dict, lstm_metrics: dict,
     _save_or_show(save_path)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 6. 레이더 차트 (선택 사용)
-# ─────────────────────────────────────────────────────────────────────
 def plot_radar(rb_metrics: dict, lstm_metrics: dict,
                save_path: str = None):
     """레이더 차트 (5개 축) – 논문 부록용"""
@@ -233,8 +210,6 @@ def plot_radar(rb_metrics: dict, lstm_metrics: dict,
     plt.tight_layout()
     _save_or_show(save_path)
 
-
-# ─────────────────────────────────────────────────────────────────────
 def _save_or_show(save_path):
     if save_path:
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)

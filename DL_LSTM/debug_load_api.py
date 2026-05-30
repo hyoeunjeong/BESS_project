@@ -1,7 +1,3 @@
-"""
-ODcloud 부하 API 응답 구조 확인용 디버깅 스크립트
-실행: python debug_load_api.py
-"""
 import json
 import requests
 import config

@@ -1,35 +1,10 @@
-"""
-solar_estimator.py  ─  단기예보 → 태양광 발전량 추정 모듈
-============================================================
-기상청 단기예보 8개 변수를 받아 시간별 태양광 발전량(kW)을 추정합니다.
-
-변환 흐름:
-    [1] 청천일사량 (태양 위치 기반 이론 최대값)
-    [2] 구름 보정 (SKY)
-    [3] 강수 보정 (PTY, PCP)
-    [4] 적설 보정 (SNO) — 패널 위 눈 덮임
-    [5] 일사량 → DC 발전량
-    [6] 온도 보정 (TMP, WSD, NOCT)
-    [7] 시스템 효율 (PR, 인버터)
-    → 최종 AC 출력 (kW)
-
-참고 표준:
-    - KS C 8526 (태양광 모듈 시험 표준)
-    - 한국에너지공단 신재생에너지 백서
-    - PVGIS (유럽 표준 청천일사량 모델)
-"""
-
 import numpy as np
 import pandas as pd
 from datetime import datetime
 
 import config
 
-
-# =====================================================================
 # 보정 계수 (한국 환경 기준)
-# =====================================================================
-
 # SKY (하늘상태) → 일사량 투과율
 # 한국기상학회 연구 기반 (구름 광학 두께 평균값)
 SKY_TRANSMITTANCE = {
@@ -54,10 +29,7 @@ PTY_REDUCTION = {
 SOLAR_CONSTANT = 1361.0  # W/m²
 
 
-# =====================================================================
 # [1] 청천일사량 계산 (Clear-Sky Irradiance)
-# =====================================================================
-
 def solar_position(timestamp: pd.Timestamp,
                    latitude: float,
                    longitude: float) -> tuple:
@@ -173,11 +145,7 @@ def tilted_irradiance(ghi: float,
     poa = ghi * (0.7 * direct_ratio + 0.3 * diffuse_factor + reflected_factor)
     return max(0.0, poa)
 
-
-# =====================================================================
 # [2~4] 기상 보정 (SKY, PTY, SNO)
-# =====================================================================
-
 def cloud_correction(irradiance: float, sky: float) -> float:
     """SKY 코드 → 일사량 투과율 적용"""
     sky_code = int(sky) if not pd.isna(sky) else 1
@@ -217,11 +185,7 @@ def snow_correction(irradiance: float, sno: float) -> float:
         return irradiance * 0.10
     return irradiance * 0.0
 
-
-# =====================================================================
 # [5~7] 발전량 변환 (POA → DC → AC)
-# =====================================================================
-
 def cell_temperature(ambient_temp: float,
                      irradiance: float,
                      wind_speed: float = 1.0,
@@ -332,11 +296,7 @@ def estimate_pv_power(forecast_row: dict,
         'ac_power': round(ac_power, 2),
     }
 
-
-# =====================================================================
 # 메인 함수: 단기예보 DataFrame → 태양광 DataFrame
-# =====================================================================
-
 def forecast_to_solar(forecast_df: pd.DataFrame,
                       latitude: float = None,
                       longitude: float = None,
@@ -373,10 +333,7 @@ def forecast_to_solar(forecast_df: pd.DataFrame,
 
     return df[['timestamp', 'ac_power']].rename(columns={'ac_power': 'solar_kw'})
 
-
-# =====================================================================
 # 단독 테스트
-# =====================================================================
 if __name__ == '__main__':
     print("=" * 70)
     print("  solar_estimator.py 단독 테스트")

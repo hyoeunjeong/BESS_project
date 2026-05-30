@@ -1,8 +1,3 @@
-"""
-한국 월별 일조량 패턴을 반영한 시간별 PV 발전량을 계산합니다.
-실제 일사량 데이터가 없을 때 사용하는 물리 기반 근사 모델입니다.
-"""
-
 import numpy as np
 import pandas as pd
 import config
@@ -66,7 +61,6 @@ def simulate_solar_generation(days: int = 30,
     return pd.DataFrame({'timestamp': timestamps, 'solar_kw': outputs})
 
 
-# ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     df = simulate_solar_generation(days=3)
     print("=== 태양광 발전량 샘플 (첫 24h) ===")

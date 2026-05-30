@@ -1,15 +1,9 @@
-"""
-숫자와 단위가 일직선으로 정렬되도록 수정
-"""
-
 import numpy as np
 import pandas as pd
 import config
 
 
-# =====================================================================
 # [1] 경제적 효율
-# =====================================================================
 def calc_economic(result_df: pd.DataFrame,
                   baseline_df: pd.DataFrame) -> dict:
     """전기요금 기반 경제적 효율 지표"""
@@ -55,9 +49,7 @@ def calc_economic(result_df: pd.DataFrame,
     }
 
 
-# =====================================================================
 # [2] 에너지 효율
-# =====================================================================
 def calc_energy(result_df: pd.DataFrame) -> dict:
     """에너지 흐름 기반 효율 지표"""
     ts = config.TIME_STEP_HOURS
@@ -101,9 +93,7 @@ def calc_energy(result_df: pd.DataFrame) -> dict:
     }
 
 
-# =====================================================================
 # [3] 운영 안정성 및 효율성
-# =====================================================================
 def calc_stability(result_df: pd.DataFrame) -> dict:
     """운영 안정성 및 효율성 지표"""
     n   = len(result_df)
@@ -159,9 +149,7 @@ def calc_stability(result_df: pd.DataFrame) -> dict:
     }
 
 
-# =====================================================================
 # 통합 평가
-# =====================================================================
 def evaluate_all(result_df: pd.DataFrame,
                  baseline_df: pd.DataFrame) -> dict:
     """세 카테고리 평가 지표를 한 번에 계산"""
@@ -172,9 +160,7 @@ def evaluate_all(result_df: pd.DataFrame,
     }
 
 
-# =====================================================================
 # 출력 헬퍼 함수: 라벨과 숫자/단위 정렬 맞춤
-# =====================================================================
 def _row(label: str, value, unit: str = '', value_width: int = 14,
         decimals: int = 0, use_comma: bool = True):
     """
@@ -207,10 +193,7 @@ def _row(label: str, value, unit: str = '', value_width: int = 14,
     # 출력: 라벨 : 숫자 단위
     print(f"  {label_str}: {value_str} {unit}")
 
-
-# =====================================================================
 # 평가 결과 출력 (정렬 맞춤판)
-# =====================================================================
 def print_report(metrics: dict, title: str = "BESS Rule-Based 제어 평가 리포트"):
     """평가 결과 콘솔 출력"""
     sep = "=" * 62
@@ -218,7 +201,7 @@ def print_report(metrics: dict, title: str = "BESS Rule-Based 제어 평가 리�
     print(f"  {title}")
     print(sep)
 
-    # ── [1] 경제적 효율 ──────────────────────────────────────
+    # ── [1] 경제적 효율 
     print("\n[1] 경제적 효율")
     print("-" * 62)
     e = metrics['economic']
@@ -247,7 +230,7 @@ def print_report(metrics: dict, title: str = "BESS Rule-Based 제어 평가 리�
               f"{b['saving_won']:>12,.0f}원 "
               f"{b['saving_pct']:>10.2f}%")
 
-    # ── [2] 에너지 효율 ──────────────────────────────────────
+    # ── [2] 에너지 효율 
     print("\n[2] 에너지 효율")
     print("-" * 62)
     en = metrics['energy']
@@ -262,7 +245,7 @@ def print_report(metrics: dict, title: str = "BESS Rule-Based 제어 평가 리�
     _row("에너지 손실량",    en['energy_loss_kwh'],          "kWh", decimals=2)
     _row("커튼일먼트",       en['curtailment_kwh'],          "kWh", decimals=2)
 
-    # ── [3] 운영 안정성 ──────────────────────────────────────
+    # ── [3] 운영 안정성 
     print("\n[3] 운영 안정성 및 효율성")
     print("-" * 62)
     s = metrics['stability']

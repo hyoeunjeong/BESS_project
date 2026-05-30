@@ -1,11 +1,3 @@
-"""
-web_app_realtime.py - BESS 실시간 모니터링
-- 모달: 7일치 누적 표시 (수집된 만큼)
-- 실시간 전력흐름 그래프 모달 (일일 데이터)
-- 비교 표: 1시간 평균값으로 시간별 표시
-- 이전 시간 비교 데이터 유지
-"""
-
 import os
 import sqlite3
 import threading
@@ -93,7 +85,8 @@ def init_comparison_db():
         print(f"[DB 에러] {e}")
 
 
-def query_db(query: str, params: tuple = (), db_path=DB_PATH):
+def query_db(query: str, params: tuple = (), db_path=DB_PATH, silent: bool = False):
+    """DB 쿼리. silent=True면 에러 발생 시 로그 출력 안 함 (fallback 시도용)"""
     try:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
@@ -102,7 +95,8 @@ def query_db(query: str, params: tuple = (), db_path=DB_PATH):
         conn.close()
         return rows
     except Exception as e:
-        print(f"[DB 에러] {e}")
+        if not silent:
+            print(f"[DB 에러] {e}")
         return []
 
 
@@ -135,24 +129,45 @@ def insert_comparison(timestamp, hour, lstm_data, rb_data):
 
 
 def get_latest_data() -> dict:
+
+    # 1순위: current_state 테이블 (실시간 박스용, 1초마다 갱신)
+    # silent=True로 호출하여 테이블이 없어도 에러 로그 출력하지 않음 (fallback 시도)
     rows = query_db('''
-        SELECT timestamp, hour, load_kw, solar_kw, soc, bess_power_kw, 
-               charge_kw, discharge_kw, grid_power_kw, tariff_rate, tariff_period, action
-        FROM realtime ORDER BY id DESC LIMIT 1
-    ''')
+        SELECT timestamp, hour, load_kw, solar_kw, soc, bess_power_kw,
+               charge_kw, discharge_kw, grid_power_kw, tariff_rate, tariff_period, action,
+               smp, data_source, solar_source, forecast_base
+        FROM current_state WHERE id = 1
+    ''', silent=True)
+    
+    # 2순위: realtime 테이블 마지막 1행
+    if not rows:
+        rows = query_db('''
+            SELECT timestamp, hour, load_kw, solar_kw, soc, bess_power_kw,
+                   charge_kw, discharge_kw, grid_power_kw, tariff_rate, tariff_period, action,
+                   smp, data_source, solar_source, forecast_base
+            FROM realtime ORDER BY id DESC LIMIT 1
+        ''')
+    
     if not rows:
         return None
+    
     row = rows[0]
     return {
         'timestamp': row[0], 'hour': row[1],
-        'load_kw': float(row[2]), 'solar_kw': float(row[3]),
-        'soc': float(row[4]) * 100,
-        'bess_power_kw': float(row[5]),
-        'charge_kw': float(row[6]), 'discharge_kw': float(row[7]),
-        'grid_power_kw': float(row[8]),
-        'tariff_rate': float(row[9]), 'tariff_period': row[10],
-        'action': row[11],
+        'load_kw': float(row[2] or 0), 'solar_kw': float(row[3] or 0),
+        'soc': float(row[4] or 0) * 100,
+        'bess_power_kw': float(row[5] or 0),
+        'charge_kw': float(row[6] or 0), 'discharge_kw': float(row[7] or 0),
+        'grid_power_kw': float(row[8] or 0),
+        'tariff_rate': float(row[9] or 0), 'tariff_period': row[10] or 'off_peak',
+        'action': row[11] or 'idle',
+        # 시연용 신규 필드
+        'smp': float(row[12] or 0) if len(row) > 12 else 0.0,
+        'data_source': row[13] if len(row) > 13 else 'unknown',
+        'solar_source': row[14] if len(row) > 14 else 'unknown',
+        'forecast_base': row[15] if len(row) > 15 else '',
     }
+
 
 
 def get_daily_stats() -> dict:
@@ -263,7 +278,11 @@ def get_weekly_data() -> list:
 
 
 def get_daily_detailed() -> list:
-    """가장 최근 데이터가 있는 날의 30분 단위 상세 데이터 (실시간 전력흐름 모달용)"""
+    """가장 최근 데이터가 있는 날의 1분 단위 상세 데이터 (실시간 전력흐름 모달용)
+    
+    - 부하/태양광/SOC/계통: 1분 평균
+    - BESS: 1분 동안 절대값 가장 큰 값 (충방전 패턴 강조)
+    """
     # 1) 가장 최근 데이터의 날짜 찾기
     latest = query_db('''
         SELECT DATE(timestamp) FROM realtime 
@@ -275,12 +294,18 @@ def get_daily_detailed() -> list:
     
     target_date = latest[0][0]
     
-    # 2) 그 날의 30분 단위 집계
+    # 2) 그 날의 1분 단위 집계 (BESS는 절대값 최대)
     rows = query_db('''
         SELECT 
-            strftime('%H', timestamp) || ':' || 
-                printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / 30) * 30) as time_label,
-            AVG(load_kw), AVG(solar_kw), AVG(bess_power_kw), AVG(grid_power_kw),
+            strftime('%H:%M', timestamp) as time_label,
+            AVG(load_kw), 
+            AVG(solar_kw), 
+            CASE 
+                WHEN ABS(MIN(bess_power_kw)) > ABS(MAX(bess_power_kw))
+                THEN MIN(bess_power_kw)
+                ELSE MAX(bess_power_kw)
+            END as bess_power_kw,
+            AVG(grid_power_kw),
             AVG(soc) * 100 as avg_soc,
             COUNT(*) as cnt
         FROM realtime
@@ -356,15 +381,21 @@ def api_daily_stats():
 
 @app.route('/api/history')
 def api_history():
-    """최근 N시간의 데이터를 30분 단위 평균으로 반환"""
     hours = int(request.args.get('hours', 24))
     
-    # 30분 단위로 그룹화 (최근 hours 시간치)
+    # 1분 단위로 그룹화 (최근 hours 시간치)
     rows = query_db(f'''
         SELECT 
-            strftime('%Y-%m-%d %H', timestamp) || ':' || 
-                printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / 30) * 30) || ':00' as time_label,
-            AVG(load_kw), AVG(solar_kw), AVG(soc), AVG(bess_power_kw), AVG(grid_power_kw)
+            strftime('%Y-%m-%d %H:%M:00', timestamp) as time_label,
+            AVG(load_kw), 
+            AVG(solar_kw), 
+            AVG(soc), 
+            CASE 
+                WHEN ABS(MIN(bess_power_kw)) > ABS(MAX(bess_power_kw))
+                THEN MIN(bess_power_kw)
+                ELSE MAX(bess_power_kw)
+            END as bess_power_kw,
+            AVG(grid_power_kw)
         FROM realtime
         WHERE timestamp >= datetime('now', 'localtime', '-{hours} hours')
         GROUP BY time_label
@@ -399,16 +430,13 @@ def api_comparison():
     return jsonify({'data': get_comparison_data(hours)})
 
 
-# =====================================================================
+
 # 1년치 진짜 비교 데이터 (comparison_metrics.csv 활용)
-# =====================================================================
 YEARLY_COMPARISON_CSV = PROJECT_ROOT / 'comparison_results' / 'comparison_metrics.csv'
 
 
 def get_yearly_comparison() -> dict:
-    """
-    1년치 시뮬레이션 비교 결과 로드 (compare.py 결과)
-    
+    """    
     Returns
     -------
     dict : 카테고리별로 정리된 비교 데이터
@@ -583,13 +611,10 @@ def get_yearly_comparison() -> dict:
 
 @app.route('/api/yearly-comparison')
 def api_yearly_comparison():
-    """1년치 시뮬레이션 비교 결과 (compare.py 결과)"""
     return jsonify(get_yearly_comparison())
 
 
-# =====================================================================
 # 월별 비교 데이터 (시뮬레이션 CSV 직접 분석)
-# =====================================================================
 RB_SIMULATION_CSV   = PROJECT_ROOT / 'rule_based' / 'results' / 'rb_simulation_result.csv'
 LSTM_SIMULATION_CSV = PROJECT_ROOT / 'DL_LSTM'   / 'results' / 'lstm_simulation_result.csv'
 
@@ -598,13 +623,7 @@ _MONTHLY_COMPARISON_CACHE = None
 
 
 def _compute_monthly_stats(csv_path) -> dict:
-    """
-    시뮬레이션 CSV를 읽어서 월별 통계 계산.
-    
-    Returns
-    -------
-    dict : {month: {self_sufficiency, soc_avg, cycle, cost_saving, total_load, ...}}
-    """
+
     import csv as csv_mod
     from collections import defaultdict
     
@@ -694,10 +713,7 @@ def _compute_monthly_stats(csv_path) -> dict:
 
 
 def get_monthly_comparison() -> dict:
-    """
-    월별 LSTM vs Rule-Based 비교 데이터 (시뮬레이션 CSV 기반).
-    캐싱: CSV 파일은 변하지 않으므로 1회만 계산.
-    """
+
     global _MONTHLY_COMPARISON_CACHE
     if _MONTHLY_COMPARISON_CACHE is not None:
         return _MONTHLY_COMPARISON_CACHE
@@ -2153,23 +2169,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 data: {
                     labels: data.map(d => d.hour),
                     datasets: [
-                        { label: '부하', data: data.map(d => d.load_kw), borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointHoverRadius: 7 },
-                        { label: '태양광', data: data.map(d => d.solar_kw), borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointHoverRadius: 7 },
-                        { label: 'BESS', data: data.map(d => d.bess_power_kw), borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointHoverRadius: 7 },
-                        { label: '계통', data: data.map(d => d.grid_power_kw), borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4, pointHoverRadius: 7 },
+                        { label: '부하', data: data.map(d => d.load_kw), borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                        { label: '태양광', data: data.map(d => d.solar_kw), borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                        { label: 'BESS', data: data.map(d => d.bess_power_kw), borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                        { label: '계통', data: data.map(d => d.grid_power_kw), borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     interaction: { mode: 'index', intersect: false },
+                    elements: { point: { radius: 0, hoverRadius: 0 } },
                     plugins: { 
                         legend: { labels: { color: '#e2e8f0' } },
                         tooltip: { mode: 'index', intersect: false }
                     },
                     scales: {
-                        y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
-                        x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } }
+                        y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.25)' }, ticks: { color: '#94a3b8' } },
+                        x: { 
+                            grid: { display: false },
+                            ticks: { 
+                                color: '#94a3b8',
+                                autoSkip: false,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: { size: 10 },
+                                callback: function(val, index) {
+                                    // 30분 단위(HH:00 또는 HH:30)만 표시
+                                    const label = this.getLabelForValue(val);
+                                    if (!label) return '';
+                                    if (label.endsWith(':00') || label.endsWith(':30')) {
+                                        return label;
+                                    }
+                                    return '';
+                                }
+                            } 
+                        }
                     }
                 }
             });
@@ -2350,15 +2386,38 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 data: {
                     labels: [],
                     datasets: [
-                        { label: '부하', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                        { label: '태양광', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                        { label: 'BESS', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                        { label: '계통', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                        { label: '부하', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                        { label: '태양광', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                        { label: 'BESS', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                        { label: '계통', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
                     ]
                 },
                 options: { responsive: true, maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
-                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } } },
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    elements: { point: { radius: 0, hoverRadius: 0 } },
+                    scales: { 
+                        y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.25)' }, ticks: { color: '#94a3b8' } },
+                        x: { 
+                            grid: { color: 'rgba(51, 65, 85, 0.15)', display: false },
+                            ticks: { 
+                                color: '#94a3b8',
+                                autoSkip: false,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: { size: 10 },
+                                callback: function(val, index) {
+                                    // 30분 단위(HH:00 또는 HH:30)만 표시
+                                    const label = this.getLabelForValue(val);
+                                    if (!label) return '';
+                                    if (label.endsWith(':00') || label.endsWith(':30')) {
+                                        return label;
+                                    }
+                                    return '';
+                                }
+                            } 
+                        } 
+                    },
                     plugins: { legend: { labels: { color: '#e2e8f0' } } } }
             });
         }
@@ -2393,9 +2452,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-# =====================================================================
 # 모바일/Pi4 7인치용 HTML (4페이지 구성)
-# =====================================================================
 MOBILE_HTML = """<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -3215,7 +3272,7 @@ MOBILE_HTML = """<!DOCTYPE html>
             });
         }
 
-        // ============ 실시간 전력흐름 모달 ============
+        //  실시간 전력흐름 모달 
         function openPowerFlowModal() {
             document.getElementById('powerflow-modal').classList.add('active');
             const modalContent = document.getElementById('powerflow-modal-content');
@@ -3336,17 +3393,38 @@ MOBILE_HTML = """<!DOCTYPE html>
             powerFlowDetailChart = new Chart(ctx, {
                 type: 'line',
                 data: { labels: data.map(d => d.hour), datasets: [
-                    { label: '부하', data: data.map(d => d.load_kw), borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                    { label: '태양광', data: data.map(d => d.solar_kw), borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                    { label: 'BESS', data: data.map(d => d.bess_power_kw), borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                    { label: '계통', data: data.map(d => d.grid_power_kw), borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: '부하', data: data.map(d => d.load_kw), borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                    { label: '태양광', data: data.map(d => d.solar_kw), borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                    { label: 'BESS', data: data.map(d => d.bess_power_kw), borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                    { label: '계통', data: data.map(d => d.grid_power_kw), borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
                 ]},
                 options: { responsive: true, maintainAspectRatio: false,
+                    animation: false,
                     interaction: { mode: 'index', intersect: false },
+                    elements: { point: { radius: 0, hoverRadius: 0 } },
                     plugins: { legend: { labels: { color: '#e2e8f0' } },
                                tooltip: { mode: 'index', intersect: false } },
-                    scales: { y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
-                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } } }
+                    scales: { 
+                        y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.25)' }, ticks: { color: '#94a3b8' } },
+                        x: { 
+                            grid: { display: false },
+                            ticks: { 
+                                color: '#94a3b8',
+                                autoSkip: false,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: { size: 9 },
+                                callback: function(val, index) {
+                                    const label = this.getLabelForValue(val);
+                                    if (!label) return '';
+                                    if (label.endsWith(':00') || label.endsWith(':30')) {
+                                        return label;
+                                    }
+                                    return '';
+                                }
+                            } 
+                        }
+                    }
                 }
             });
         }
@@ -3359,7 +3437,7 @@ MOBILE_HTML = """<!DOCTYPE html>
             });
         }
 
-        // ============ Rule-Based vs LSTM 비교 모달 (1년치 진짜 데이터) ============
+        //  Rule-Based vs LSTM 비교 모달 (1년치 진짜 데이터) 
         let yearlyDataCache = null;
         
         function openComparisonModal() {
@@ -3594,7 +3672,7 @@ MOBILE_HTML = """<!DOCTYPE html>
             document.getElementById('yearly-detail-container').innerHTML = html;
         }
 
-        // ============ 페이지 4: 1년치 비교 요약 (메인 화면) ============
+        //  페이지 4: 1년치 비교 요약 (메인 화면) 
         function updateComparison() {
             fetch('/api/yearly-comparison').then(r => r.json()).then(data => {
                 renderYearlyMainView(data);
@@ -3688,14 +3766,14 @@ MOBILE_HTML = """<!DOCTYPE html>
         }
 
 
-        // ============ ESC 키로 모달 닫기 ============
+        //  ESC 키로 모달 닫기 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeModal(); closePowerFlowModal(); closeComparisonModal();
             }
         });
 
-        // ============ 자동 업데이트 ============
+        //  자동 업데이트 
         setInterval(() => fetch('/api/status').then(r => r.json()).then(updateMetrics).catch(e => {}), 1000);
         setInterval(() => fetch('/api/daily-stats').then(r => r.json()).then(updateStats).catch(e => {}), 10000);
         setInterval(() => {
@@ -3757,14 +3835,37 @@ MOBILE_HTML = """<!DOCTYPE html>
             chart = new Chart(ctx, {
                 type: 'line',
                 data: { labels: [], datasets: [
-                    { label: '부하', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                    { label: '태양광', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                    { label: 'BESS', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
-                    { label: '계통', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, tension: 0.4, fill: true },
+                    { label: '부하', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                    { label: '태양광', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                    { label: 'BESS', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
+                    { label: '계통', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.06)', borderWidth: 1.5, tension: 0.2, fill: true, pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 10 },
                 ]},
                 options: { responsive: true, maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } },
-                              x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8' } } },
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    elements: { point: { radius: 0, hoverRadius: 0 } },
+                    scales: { 
+                        y: { beginAtZero: false, grid: { color: 'rgba(51, 65, 85, 0.25)' }, ticks: { color: '#94a3b8' } },
+                        x: { 
+                            grid: { color: 'rgba(51, 65, 85, 0.15)', display: false },
+                            ticks: { 
+                                color: '#94a3b8',
+                                autoSkip: false,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                font: { size: 9 },
+                                callback: function(val, index) {
+                                    // 30분 단위(HH:00 또는 HH:30)만 표시
+                                    const label = this.getLabelForValue(val);
+                                    if (!label) return '';
+                                    if (label.endsWith(':00') || label.endsWith(':30')) {
+                                        return label;
+                                    }
+                                    return '';
+                                }
+                            } 
+                        } 
+                    },
                     plugins: { legend: { labels: { color: '#e2e8f0' } } } }
             });
         }

@@ -1,7 +1,3 @@
-"""
-SMP API 429 응답 본문 확인용 디버그 스크립트
-실행: python debug_smp_api.py
-"""
 import requests
 from urllib.parse import urlencode
 import config

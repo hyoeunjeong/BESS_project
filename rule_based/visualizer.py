@@ -1,7 +1,3 @@
-"""
-시뮬레이션 결과를 PNG 파일로 저장합니다.
-"""
-
 import os
 import platform
 import numpy as np
@@ -9,15 +5,13 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 
-# ── 한글 폰트 설정 ──────────────────────────────────────────────────
+# ── 한글 폰트 설정 
 _FONT_MAP = {'Windows': 'Malgun Gothic', 'Darwin': 'AppleGothic'}
 matplotlib.rc('font', family=_FONT_MAP.get(platform.system(), 'DejaVu Sans'))
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 1. 하루치 운영 그래프
-# ─────────────────────────────────────────────────────────────────────
 def plot_daily_operation(result_df: pd.DataFrame,
                           day_idx: int = 0,
                           save_path: str = None):
@@ -75,9 +69,7 @@ def plot_daily_operation(result_df: pd.DataFrame,
     _save_or_show(save_path)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 2. 전체 기간 SOC 추세
-# ─────────────────────────────────────────────────────────────────────
 def plot_soc_trend(result_df: pd.DataFrame, save_path: str = None):
     """전체 시뮬레이션 기간 SOC 변화 추세"""
     fig, ax = plt.subplots(figsize=(14, 4))
@@ -98,9 +90,7 @@ def plot_soc_trend(result_df: pd.DataFrame, save_path: str = None):
     _save_or_show(save_path)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 3. 평가 지표 요약 차트
-# ─────────────────────────────────────────────────────────────────────
 def plot_metrics_summary(metrics: dict, save_path: str = None):
     """경제·에너지·안정성 지표 막대 요약"""
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -153,9 +143,7 @@ def plot_metrics_summary(metrics: dict, save_path: str = None):
     _save_or_show(save_path)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 내부 유틸
-# ─────────────────────────────────────────────────────────────────────
 def _save_or_show(save_path: str):
     if save_path:
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)

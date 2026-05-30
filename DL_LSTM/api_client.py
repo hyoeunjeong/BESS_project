@@ -1,19 +1,3 @@
-"""
-api_client.py  ─  공공 데이터 API 클라이언트
-==============================================
-4개 공공 API를 호출하여 부하/SMP/기상/예보 데이터를 가져옵니다.
-
-1. ODcloud 부하 데이터 API
-2. 공공데이터포털 SMP API
-3. 기상청 ASOS 시간자료 API (과거 관측, 옵션)
-4. 기상청 단기예보 API (실시간 예보, 신규)
-
-캐시 전략
----------
-- 동일 기간 데이터는 data/cache/ 폴더에 CSV로 저장 후 재사용
-- 캐시 hit 시 API를 호출하지 않아 속도와 할당량 절약
-"""
-
 import os
 import time
 import requests
@@ -24,10 +8,8 @@ from urllib.parse import unquote
 
 import config
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 공통 유틸
-# ─────────────────────────────────────────────────────────────────────
+
 def _cache_path(name: str, start: str, end: str) -> str:
     """캐시 파일 경로 생성"""
     os.makedirs(config.API_CACHE_DIR, exist_ok=True)
@@ -53,9 +35,8 @@ def _save_cache(df: pd.DataFrame, path: str):
     print(f"   [캐시 저장] {os.path.basename(path)}")
 
 
-# =====================================================================
+
 # 1. ODcloud 부하 데이터 API
-# =====================================================================
 def fetch_load_data(start_date: str = None,
                     end_date  : str = None,
                     use_cache : bool = True) -> pd.DataFrame:
@@ -148,9 +129,7 @@ def _parse_odcloud_load(rows: list) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-# =====================================================================
 # 2. SMP API (공공데이터포털)
-# =====================================================================
 def fetch_smp_data(start_date: str,
                    end_date  : str,
                    use_cache : bool = True,
@@ -421,10 +400,7 @@ def _fetch_smp_range(start_date: str, end_date: str,
         raise RuntimeError("SMP API: token quota exceeded")
     return df
 
-
-# =====================================================================
 # 3. 기상청 ASOS API (과거 관측 — 백업/학습용)
-# =====================================================================
 def fetch_weather_data(start_date: str,
                        end_date  : str,
                        station_id: int = 108,
@@ -499,18 +475,12 @@ def _safe_float(v) -> float:
     except (ValueError, TypeError):
         return np.nan
 
-
-# =====================================================================
 # 4. 기상청 단기예보 API (실시간 예보 — 운영용) [NEW]
-# =====================================================================
 # 발표시각: 02, 05, 08, 11, 14, 17, 20, 23시 (1일 8회)
 # 예보범위: 발표시각 기준 +3일까지
-# 응답 카테고리(14개) 중 태양광 추정에 필요한 8개만 추출:
+# 응답 카테고리(8개):
 #   SKY(하늘상태), PTY(강수형태), TMP(기온), REH(습도),
 #   WSD(풍속), POP(강수확률), PCP(강수량), SNO(적설)
-# =====================================================================
-
-# 추출할 카테고리 (태양광 추정 관련 8개)
 _FORECAST_CATEGORIES = ['SKY', 'PTY', 'TMP', 'REH', 'WSD', 'POP', 'PCP', 'SNO']
 
 
@@ -753,10 +723,7 @@ def _parse_forecast_value(category: str, value) -> float | None:
     except (ValueError, TypeError):
         return None
 
-
-# =====================================================================
 # 캐시 관리
-# =====================================================================
 def clear_cache():
     """모든 API 캐시 삭제"""
     if not os.path.exists(config.API_CACHE_DIR):
@@ -766,7 +733,7 @@ def clear_cache():
     print(f"[캐시 삭제] {config.API_CACHE_DIR}")
 
 
-# =====================================================================
+
 if __name__ == '__main__':
     print("=" * 60)
     print("  API 클라이언트 단독 테스트")

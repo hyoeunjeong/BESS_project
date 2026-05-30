@@ -1,19 +1,3 @@
-"""
-api_client.py  ─  공공데이터포털 API 클라이언트
-==========================================================
-1. 부하 데이터 (ODcloud API)
-   URL: https://api.odcloud.kr/api/15065266/v1/uddi:6ade08d2-...
-   응답: data 배열, {날짜, 1시~24시}
-
-2. SMP 데이터 (Public Data Portal API)
-   URL: https://apis.data.go.kr/B552115/SmpWithForecastDemand/...
-   응답: items.item 배열, {date, hour, areaName, smp, slfd, mlfd}
-
-3. 기상청 ASOS (Public Data Portal API)
-   URL: http://apis.data.go.kr/1360000/AsosHourlyInfoService/...
-   응답: items.item 배열, {tm, icsr, ta, hm, ws}
-"""
-
 import os
 import time
 import pandas as pd
@@ -22,10 +6,7 @@ from urllib.parse import unquote
 from datetime import datetime, timedelta
 import config
 
-
-# =====================================================================
 # 내부 유틸
-# =====================================================================
 def _ensure_cache_dir():
     os.makedirs(config.API_CACHE_DIR, exist_ok=True)
 
@@ -55,10 +36,7 @@ def _validate_key(key: str, name: str):
             f"  config.py 의 API_KEYS['{name.lower()}'] 에 인증키를 입력하세요.\n"
         )
 
-
-# =====================================================================
 # 1. 부하 데이터 API (ODcloud)
-# =====================================================================
 def fetch_load_data(use_cache: bool = True) -> pd.DataFrame:
     _ensure_cache_dir()
     cache = _cache_path('load')
@@ -134,10 +112,7 @@ def fetch_load_data(use_cache: bool = True) -> pd.DataFrame:
             print(f"   응답 일부: {resp.text[:300]}")
         return pd.DataFrame()
 
-
-# =====================================================================
 # 2. SMP API (한국전력거래소_계통한계가격 및 수요예측)
-# =====================================================================
 def fetch_smp_data(start_date: str = None,
                    end_date: str = None,
                    area: str = '육지',
@@ -220,10 +195,7 @@ def fetch_smp_data(start_date: str = None,
 
     return df
 
-
-# =====================================================================
 # 3. 기상청 ASOS API
-# =====================================================================
 def fetch_kma_data(start_date: str = None,
                    end_date: str = None,
                    station_id: int = None,
@@ -311,10 +283,7 @@ def fetch_kma_data(start_date: str = None,
 
     return df
 
-
-# =====================================================================
 # 일사량 → 태양광 발전량 변환
-# =====================================================================
 def convert_irradiance_to_solar(kma_df: pd.DataFrame,
                                  capacity_kw: float = None,
                                  efficiency: float = None) -> pd.DataFrame:
@@ -333,8 +302,6 @@ def convert_irradiance_to_solar(kma_df: pd.DataFrame,
 
     return df[['timestamp', 'solar_kw']]
 
-
-# ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("=== 부하 API 단독 테스트 ===\n")
     try:

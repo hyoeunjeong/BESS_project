@@ -1,10 +1,3 @@
-"""
-3가지 API의 실제 응답 구조를 확인합니다.
-실행 후 출력 결과를 보면 코드를 어떻게 수정할지 알 수 있습니다.
-
-실행: python test_api.py
-"""
-
 import json
 import requests
 from urllib.parse import unquote

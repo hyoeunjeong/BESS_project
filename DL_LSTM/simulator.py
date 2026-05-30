@@ -1,10 +1,3 @@
-"""
-simulator.py  ─  LSTM 기반 BESS 시뮬레이션 엔진
-================================================
-LSTM 모델의 예측값을 실시간으로 받아 LSTMBESSController 를 구동합니다.
-Rule-Based simulator.py 와 완전히 독립된 파일입니다.
-"""
-
 import numpy as np
 import pandas as pd
 
@@ -17,25 +10,6 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
                         predicted_nl   : np.ndarray,
                         test_start_idx : int,
                         controller     : LSTMBESSController = None) -> pd.DataFrame:
-    """
-    LSTM 예측값 기반 BESS 시뮬레이션
-
-    Parameters
-    ----------
-    merged_df      : add_features() 가 적용된 전체 DataFrame
-    predicted_nl   : LSTM 예측 순부하 (역정규화 kW, 테스트셋 길이)
-    test_start_idx : 테스트셋이 시작하는 merged_df 행 인덱스
-    controller     : LSTMBESSController (None 이면 기본값)
-
-    Returns
-    -------
-    DataFrame : 시뮬레이션 결과
-        timestamp, hour, load_kw, solar_kw, smp,
-        tariff_period, tariff_rate,
-        predicted_net_load_kw,
-        bess_power_kw, charge_kw, discharge_kw,
-        grid_power_kw, soc, action
-    """
     if controller is None:
         controller = LSTMBESSController()
 
@@ -78,10 +52,6 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
 
 
 def run_baseline_simulation(test_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    BESS 없는 기준 시나리오 (Deep Learning 비교용)
-    evaluator.py 에서 Rule-Based baseline 과 동일한 조건으로 사용합니다.
-    """
     df = test_df.copy()
     df['bess_power_kw'] = 0.0
     df['charge_kw']     = 0.0

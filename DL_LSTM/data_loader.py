@@ -1,16 +1,3 @@
-"""
-data_loader.py  ─  Deep Learning 프로젝트용 데이터 로더
-=======================================================
-Rule-Based 프로젝트의 data_loader.py 와 완전히 독립된 파일입니다.
-
-추가 기능 (LSTM 전용)
----------------------
-- 피처 엔지니어링 (시간 sin/cos 순환 인코딩, 요일, 요금 등)
-- MinMaxScaler 정규화
-- LSTM 입력 시퀀스(X) / 타깃(y) 생성
-- train / val / test 분할
-"""
-
 import os
 import pickle
 import numpy as np
@@ -27,9 +14,8 @@ except ImportError:
     print("[경고] api_client 모듈 없음 → CSV/가상 데이터만 사용")
 
 
-# ─────────────────────────────────────────────────────────────────────
+
 # CSV 읽기 유틸
-# ─────────────────────────────────────────────────────────────────────
 def _read_csv_auto(filepath: str) -> pd.DataFrame:
     for enc in ('cp949', 'utf-8', 'euc-kr'):
         try:
@@ -61,10 +47,7 @@ def _wide_to_long(df: pd.DataFrame,
     result = pd.DataFrame(records).dropna(subset=[value_col])
     return result.sort_values('timestamp').reset_index(drop=True)
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 실제 데이터 로드
-# ─────────────────────────────────────────────────────────────────────
 def load_kpx_demand_data(filepath: str) -> pd.DataFrame:
     return _wide_to_long(_read_csv_auto(filepath), '날짜', 'load_mw')
 
@@ -81,9 +64,7 @@ def scale_load_data(load_df: pd.DataFrame,
     return df[['timestamp', 'load_kw']]
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 가상 데이터 (Fallback)
-# ─────────────────────────────────────────────────────────────────────
 def generate_sample_load_data(days: int = 30, seed: int = 42) -> pd.DataFrame:
     np.random.seed(seed)
     ts = pd.date_range('2025-01-01', periods=days * 24, freq='h')
@@ -108,9 +89,7 @@ def generate_sample_smp_data(days: int = 30, seed: int = 43) -> pd.DataFrame:
     return pd.DataFrame({'timestamp': ts, 'smp': smps})
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 태양광 (Deep Learning 프로젝트 내부 사용)
-# ─────────────────────────────────────────────────────────────────────
 _MONTHLY_FACTOR = {1:0.55,2:0.65,3:0.80,4:0.90,5:0.95,6:0.85,
                    7:0.70,8:0.75,9:0.85,10:0.80,11:0.65,12:0.55}
 
@@ -128,9 +107,7 @@ def simulate_solar(days: int, start_date: str = '2024-01-01',
     return pd.DataFrame({'timestamp': ts, 'solar_kw': out})
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 피처 엔지니어링 + 정규화 + LSTM 시퀀스 생성
-# ─────────────────────────────────────────────────────────────────────
 FEATURE_COLS = [
     'load_kw',          # 전력 부하
     'solar_kw',         # 태양광 발전량
@@ -246,9 +223,7 @@ def split_sequences(X: np.ndarray, y: np.ndarray,
     return (X[:t1], y[:t1]), (X[t1:t2], y[t1:t2]), (X[t2:], y[t2:])
 
 
-# ─────────────────────────────────────────────────────────────────────
 # Scaler 저장 / 불러오기
-# ─────────────────────────────────────────────────────────────────────
 def save_scaler(scaler: MinMaxScaler, path: str = config.SCALER_SAVE_PATH):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'wb') as f:
@@ -261,9 +236,7 @@ def load_scaler(path: str = config.SCALER_SAVE_PATH) -> MinMaxScaler:
         return pickle.load(f)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 통합 로드 함수
-# ─────────────────────────────────────────────────────────────────────
 def load_data(load_path: str = config.LOAD_DATA_PATH,
               smp_path : str = config.SMP_DATA_PATH,
               fallback_days: int = config.SIMULATION_DAYS,
@@ -283,7 +256,7 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
     source = source or config.DATA_SOURCE
     load_df, smp_df, solar_df = None, None, None
 
-    # ── 1순위: API ────────────────────────────────────────────────
+    # ── 1순위: API 
     if source in ('api', 'auto') and _API_AVAILABLE:
         try:
             print("[데이터] 공공 API 호출 시도")
@@ -292,7 +265,7 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
             print(f"[데이터] API 실패 → CSV로 폴백: {ex}")
             load_df = smp_df = solar_df = None
 
-    # ── 2순위: CSV ────────────────────────────────────────────────
+    # ── 2순위: CSV 
     if load_df is None and source in ('csv', 'auto'):
         if os.path.exists(load_path) and os.path.exists(smp_path):
             print("[데이터] 실제 KPX CSV 로드")
@@ -304,14 +277,14 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
             start    = str(load_df['timestamp'].min().date())
             solar_df = simulate_solar(days=days, start_date=start)
 
-    # ── 3순위: 가상 데이터 ────────────────────────────────────────
+    # ── 3순위: 가상 데이터 
     if load_df is None:
         print(f"[데이터] 모든 소스 실패 → 가상 데이터 {fallback_days}일 생성")
         load_df  = generate_sample_load_data(fallback_days)
         smp_df   = generate_sample_smp_data(fallback_days)
         solar_df = simulate_solar(fallback_days)
 
-    # ── 병합 ──────────────────────────────────────────────────────
+    # ── 병합 
     df = load_df.merge(smp_df,   on='timestamp', how='inner')
     df = df.merge(solar_df,      on='timestamp', how='inner')
     df['hour']          = df['timestamp'].dt.hour
@@ -319,7 +292,7 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
     df['tariff_period'] = df['hour'].apply(config.get_tariff_period)
     df = df.sort_values('timestamp').reset_index(drop=True)
 
-    # ── 피처 추가 ─────────────────────────────────────────────────
+    # ── 피처 추가 
     df = add_features(df)
     print(f"[데이터] 총 {len(df):,}h ({len(df)//24}일) 로드 완료")
     return df
@@ -403,7 +376,6 @@ def _solar_from_weather(weather_df: pd.DataFrame,
     return df[['timestamp', 'solar_kw']]
 
 
-# ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     df = load_data()
     X, y, scaler = make_sequences(df)

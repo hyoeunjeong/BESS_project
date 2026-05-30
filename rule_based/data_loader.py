@@ -1,19 +1,10 @@
-"""
-모든 데이터를 API로 수집:
-- 부하 → ODcloud API
-- SMP → Public Data Portal API
-- 태양광 → 기상청 ASOS API
-"""
-
 import numpy as np
 import pandas as pd
 import os
 import config
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 내부 유틸 (CSV 백업용)
-# ─────────────────────────────────────────────────────────────────────
 def _read_csv_auto(filepath: str) -> pd.DataFrame:
     """인코딩 자동 감지"""
     for enc in ('cp949', 'utf-8', 'euc-kr'):
@@ -51,9 +42,7 @@ def _wide_to_long(df: pd.DataFrame, date_col: str, value_col: str) -> pd.DataFra
     return result.sort_values('timestamp').reset_index(drop=True)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # CSV 백업 로더 (API 실패 시)
-# ─────────────────────────────────────────────────────────────────────
 def load_kpx_demand_data(filepath: str) -> pd.DataFrame:
     """[백업] 한국전력거래소 시간별 전국 전력수요량 CSV"""
     raw = _read_csv_auto(filepath)
@@ -87,9 +76,7 @@ def merge_real_data(load_df: pd.DataFrame, smp_df: pd.DataFrame,
     return df.sort_values('timestamp').reset_index(drop=True)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 가상 데이터 (백업용)
-# ─────────────────────────────────────────────────────────────────────
 def generate_sample_load_data(days: int = 30, seed: int = 42) -> pd.DataFrame:
     """가상 부하 데이터"""
     np.random.seed(seed)
@@ -116,9 +103,7 @@ def generate_sample_smp_data(days: int = 30, seed: int = 43) -> pd.DataFrame:
     return pd.DataFrame({'timestamp': timestamps, 'smp': smps})
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 통합 데이터 로드 (완전 API)
-# ─────────────────────────────────────────────────────────────────────
 def load_all_data(use_load_api: bool = True,
                   use_smp_api: bool = True,
                   use_kma_api: bool = True) -> pd.DataFrame:

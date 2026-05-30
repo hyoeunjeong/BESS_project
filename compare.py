@@ -1,33 +1,9 @@
-"""
-compare.py  ─  Rule-Based vs LSTM BESS 비교 실행 스크립트
-==========================================================
-두 프로젝트의 시뮬레이션 결과 CSV를 읽어서
-evaluator.py 의 지표 계산 로직을 재사용해 비교합니다.
-
-설계 원칙
----------
-- 지표 계산식은 evaluator.py 의 evaluate_all() 만 사용 (단일 책임 원칙)
-- compare.py 는 "로드 + 정렬 + 표시"만 담당
-- evaluator.py 가 수정되면 자동으로 반영됨
-
-사용법
-------
-    python compare.py
-
-실행 전 준비
-------------
-1. rule_based/main.py 실행 → rule_based/results/rb_simulation_result.csv
-2. deep_learning/main.py 실행 → deep_learning/results/lstm_simulation_result.csv
-"""
-
 import os
 import sys
 import numpy as np
 import pandas as pd
 
-# ─────────────────────────────────────────────────────────────────────
 # 경로 설정 — DL_LSTM 폴더의 모듈(config, evaluator)을 import 가능하게 함
-# ─────────────────────────────────────────────────────────────────────
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _LSTM_DIR = os.path.join(_THIS_DIR, 'DL_LSTM')
 _RB_DIR   = os.path.join(_THIS_DIR, 'rule_based')
@@ -40,15 +16,13 @@ import config
 from evaluator import evaluate_all, _display_width, _pad
 
 
-# ── 경로 설정 ────────────────────────────────────────────────────────
+# ── 경로 설정 
 RB_CSV   = os.path.join(_RB_DIR,   'results', 'rb_simulation_result.csv')
 LSTM_CSV = os.path.join(_LSTM_DIR, 'results', 'lstm_simulation_result.csv')
 OUT_DIR  = os.path.join(_THIS_DIR, 'comparison_results')
 
 
-# =====================================================================
 # 파일 검증
-# =====================================================================
 def _check_files() -> bool:
     ok = True
     print(f"\n[경로 확인]")
@@ -61,9 +35,7 @@ def _check_files() -> bool:
     return ok
 
 
-# =====================================================================
 # Baseline 구성 (BESS 없는 시나리오)
-# =====================================================================
 def build_baseline(df: pd.DataFrame) -> pd.DataFrame:
     """
     BESS 없는 기준 시나리오 (계통 = 부하 - 태양광)
@@ -82,9 +54,7 @@ def build_baseline(df: pd.DataFrame) -> pd.DataFrame:
     return b
 
 
-# =====================================================================
 # 비교 표 출력
-# =====================================================================
 def print_comparison_table(rb_m: dict, dl_m: dict):
     """Rule-Based 와 LSTM 의 모든 지표를 나란히 출력"""
     sep = "=" * 78
@@ -237,10 +207,7 @@ def _fmt_diff(diff, decimals: int, unit: str) -> str:
         return str(diff)
 
 
-# =====================================================================
 # 종합 우수성 분석
-# =====================================================================
-
 # 지표 메타데이터: (카테고리, 키, 표시명, 방향, 가중치)
 # 방향: 'higher' = 높을수록 좋음, 'lower' = 낮을수록 좋음
 # 가중치: 핵심 지표 가중 평균 계산용 (0이면 카테고리별 승률에만 포함)
@@ -418,7 +385,7 @@ def print_superiority(analysis: dict):
     print("  종합 우수성 분석")
     print(sep)
 
-    # ── 카테고리별 비교 결과 ─────────────────────────────────────
+    # ── 카테고리별 비교 결과 
     print("\n  [카테고리별 비교 결과]")
     print("  " + "─" * 74)
     print(f"  {_pad('카테고리', 24)}"
@@ -453,7 +420,7 @@ def print_superiority(analysis: dict):
           f"{_pad(overall_rate_s,    10, align='right')}"
           f"{_pad(o['judgment'],     10, align='right')}")
 
-    # ── 핵심 지표 개선률 ────────────────────────────────────────
+    # ── 핵심 지표 개선률 
     print("\n  [핵심 지표 개선률 (LSTM vs Rule-Based)]")
     print("  " + "─" * 74)
     for m in analysis['core_metrics']:
@@ -480,7 +447,7 @@ def print_superiority(analysis: dict):
     cs_verdict = '개선' if cs > _WIN_THRESHOLD else ('악화' if cs < -_WIN_THRESHOLD else '유사')
     print(f"  {_pad('핵심 지표 가중 평균', 18)} : {cs:+7.1f}% {cs_verdict}")
 
-    # ── 최종 평가 ────────────────────────────────────────────────
+    # ── 최종 평가 
     print("\n  [최종 평가]")
     print("  " + "─" * 74)
     judgment = o['judgment']
@@ -513,9 +480,7 @@ def print_superiority(analysis: dict):
     print(f"\n{sep}\n")
 
 
-# =====================================================================
-# CSV 저장 (논문 표용)
-# =====================================================================
+# CSV 저장
 def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
     """비교 결과를 CSV로 저장 (long format)"""
     rows = []
@@ -569,10 +534,7 @@ def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
 
     pd.DataFrame(rows).to_csv(out_path, index=False, encoding='utf-8-sig')
 
-
-# =====================================================================
 # 메인
-# =====================================================================
 def main():
     print("=" * 78)
     print("  Rule-Based vs LSTM  ─  BESS 성능 비교")

@@ -1,7 +1,3 @@
-"""
-시간별 데이터를 순회하며 제어기를 호출하고 결과를 DataFrame으로 반환합니다.
-"""
-
 import pandas as pd
 import config
 from bess_controller import RuleBasedBESSController
@@ -67,7 +63,7 @@ def run_simulation(merged: pd.DataFrame,
 def run_baseline_simulation(merged: pd.DataFrame) -> pd.DataFrame:
     """
     BESS 없는 기준 시나리오 (비교용)
-    모든 전력을 계통 + 태양광으로만 충당합니다.
+    모든 전력을 계통 + 태양광으로만 충당한다.
 
     Returns
     -------
@@ -88,7 +84,6 @@ def run_baseline_simulation(merged: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     from data_loader import generate_sample_load_data, generate_sample_smp_data
     from data_loader import merge_real_data

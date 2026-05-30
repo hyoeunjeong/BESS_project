@@ -1,22 +1,8 @@
-"""
-evaluator.py  ─  Deep Learning BESS 평가 지표
-=============================================
-Rule-Based 프로젝트의 evaluator.py 와 동일한 지표 구조를 사용합니다.
-(공정한 비교를 위해 계산 로직 동일)
-
-추가 지표 (LSTM 전용)
----------------------
-- 예측 성능: MAE, RMSE, MAPE (순부하 예측 오차)
-"""
-
 import numpy as np
 import pandas as pd
 import config
 
-
-# =====================================================================
-# [0] LSTM 예측 성능 (추가 지표)
-# =====================================================================
+# LSTM 예측 성능 (추가 지표)
 def calc_prediction_metrics(y_true: np.ndarray,
                              y_pred: np.ndarray) -> dict:
     """
@@ -39,10 +25,7 @@ def calc_prediction_metrics(y_true: np.ndarray,
         'mape_pct': round(mape, 2),
     }
 
-
-# =====================================================================
-# [1] 경제적 효율
-# =====================================================================
+# 경제적 효율
 def calc_economic(result_df  : pd.DataFrame,
                   baseline_df: pd.DataFrame) -> dict:
     ts = config.TIME_STEP_HOURS
@@ -62,7 +45,7 @@ def calc_economic(result_df  : pd.DataFrame,
     pc_b = (bp['grid_power_kw'].clip(0) * bp['tariff_rate'] * ts).sum()
     peak_saving_rate = (pc_b - pc_r) / pc_b * 100 if pc_b > 0 else 0.0
 
-    # 시간대별 요금 breakdown ─────────────────────────────────────────
+    # 시간대별 요금 breakdown 
     breakdown = {}
     for period in ('off_peak', 'mid_peak', 'on_peak'):
         rp_ = result_df[result_df['tariff_period']   == period]
@@ -88,9 +71,7 @@ def calc_economic(result_df  : pd.DataFrame,
     }
 
 
-# =====================================================================
-# [2] 에너지 효율
-# =====================================================================
+# 에너지 효율
 def calc_energy(result_df: pd.DataFrame) -> dict:
     ts = config.TIME_STEP_HOURS
 
@@ -135,9 +116,7 @@ def calc_energy(result_df: pd.DataFrame) -> dict:
     }
 
 
-# =====================================================================
-# [3] 운영 안정성 및 효율성
-# =====================================================================
+# 운영 안정성 및 효율성
 def calc_stability(result_df: pd.DataFrame) -> dict:
     n   = len(result_df)
     ts  = config.TIME_STEP_HOURS
@@ -194,10 +173,7 @@ def calc_stability(result_df: pd.DataFrame) -> dict:
         'idle_count'              : idle_count,
     }
 
-
-# =====================================================================
 # 통합 평가
-# =====================================================================
 def evaluate_all(result_df  : pd.DataFrame,
                  baseline_df: pd.DataFrame,
                  y_true     : np.ndarray = None,
@@ -265,7 +241,7 @@ def print_report(metrics: dict, title: str = "LSTM BESS 평가 리포트"):
         print(f"  RMSE              : {p['rmse_kw']:>15.3f} kW")
         print(f"  MAPE              : {p['mape_pct']:>15.2f} %")
 
-    # ── [1] 경제적 효율 ──────────────────────────────────────────
+    # ── [1] 경제적 효율
     print("\n[1] 경제적 효율")
     print("-" * 60)
     e = metrics['economic']
@@ -294,7 +270,7 @@ def print_report(metrics: dict, title: str = "LSTM BESS 평가 리포트"):
                   f"{b['saving']:>12,.0f}원"
                   f"{b['rate_pct']:>7.2f}%")
 
-    # ── [2] 에너지 효율 ──────────────────────────────────────────
+    # ── [2] 에너지 효율
     print("\n[2] 에너지 효율")
     print("-" * 60)
     en = metrics['energy']
@@ -313,7 +289,7 @@ def print_report(metrics: dict, title: str = "LSTM BESS 평가 리포트"):
     if 'curtailment_kwh' in en:
         print(f"  커튼일먼트        : {en['curtailment_kwh']:>15,.2f} kWh")
 
-    # ── [3] 운영 안정성 및 효율성 ───────────────────────────────
+    # ── [3] 운영 안정성 및 효율성
     print("\n[3] 운영 안정성 및 효율성")
     print("-" * 60)
     s = metrics['stability']
@@ -343,9 +319,7 @@ def print_report(metrics: dict, title: str = "LSTM BESS 평가 리포트"):
     print(f"\n{sep}\n")
 
 
-# =====================================================================
 # 비교 출력 (Rule-Based vs LSTM)
-# =====================================================================
 def print_comparison(rb_metrics: dict, lstm_metrics: dict):
     """두 방식의 지표를 나란히 출력합니다 (논문 표 형식)."""
     sep = "=" * 70

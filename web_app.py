@@ -1,8 +1,3 @@
-"""
-web_app.py  ─  BESS 실시간 모니터링 웹 대시보드
-===============================================
-"""
-
 import os
 import json
 import sqlite3
@@ -16,10 +11,7 @@ from flask_socketio import SocketIO, emit
 import pandas as pd
 import numpy as np
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 경로 설정
-# ─────────────────────────────────────────────────────────────────────
 import os
 
 PROJECT_ROOT = Path(__file__).parent.absolute()
@@ -50,10 +42,7 @@ print(f"  CSV 파일: {CSV_PATH}")
 print(f"  CSV 존재: {CSV_PATH.exists()}")
 print(f"  DB 파일: {DB_PATH}\n")
 
-
-# ─────────────────────────────────────────────────────────────────────
 # Flask 설정
-# ─────────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder=str(PROJECT_ROOT / 'templates'))
 app.config['SECRET_KEY'] = 'bess-monitoring-secret-2025'
 
@@ -73,9 +62,7 @@ def favicon():
     return '', 204
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 데이터베이스 초기화
-# ─────────────────────────────────────────────────────────────────────
 def init_database():
     """CSV를 SQLite DB로 변환 (빠른 조회용)"""
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -185,10 +172,7 @@ def get_hourly_chart_data(hours: int = 24) -> dict:
         print(f"[에러] 차트 데이터 계산 실패: {e}")
     return {}
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 웹 라우트
-# ─────────────────────────────────────────────────────────────────────
 @app.route('/')
 def dashboard():
     """메인 대시보드 페이지"""
@@ -217,9 +201,7 @@ def api_chart_data():
     return jsonify(get_hourly_chart_data(hours))
 
 
-# ─────────────────────────────────────────────────────────────────────
 # WebSocket
-# ─────────────────────────────────────────────────────────────────────
 @socketio.on('connect')
 def on_connect():
     """클라이언트 연결"""
@@ -250,9 +232,7 @@ def broadcast_updates():
             time.sleep(5)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 실행
-# ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("=" * 62)
     print("  BESS 실시간 모니터링 웹 대시보드")

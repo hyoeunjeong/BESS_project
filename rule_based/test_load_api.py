@@ -1,11 +1,3 @@
-"""
-공공데이터포털 ODcloud API 시스템의 부하 데이터 응답을 확인합니다.
-
-URL: https://api.odcloud.kr/api/15065266/v1/uddi:6ade08d2-...
-
-실행: python test_load_api.py
-"""
-
 import json
 import requests
 from urllib.parse import unquote

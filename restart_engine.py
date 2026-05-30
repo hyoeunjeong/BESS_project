@@ -1,7 +1,3 @@
-"""
-restart_engine.py - realtime_engine 재시작 및 데이터베이스 초기화
-"""
-
 import sqlite3
 import os
 from pathlib import Path

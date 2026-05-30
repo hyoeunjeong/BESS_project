@@ -1,21 +1,7 @@
-"""
-사람이 직접 정의한 규칙(Rule)으로 BESS를 제어합니다.
-딥러닝·최적화 알고리즘을 전혀 사용하지 않는 순수 규칙 기반 로직입니다.
-
-제어 규칙 (우선순위 순)
------------------------
-Rule 1. 태양광 잉여 발전 → BESS 충전
-Rule 2. 최대부하·중간부하 시간대에 순부하 발생 → BESS 방전
-Rule 3. 경부하 시간대(idle 상태) → 계통에서 BESS 충전
-Rule 4. SOC 상한 초과 방지 (과충전 차단)
-Rule 5. SOC 하한 미달 방지 (과방전 차단)
-"""
-
 import config
 
 
 class RuleBasedBESSController:
-    """Rule-Based BESS 제어기 (Deep-Learning 미사용)"""
 
     def __init__(self,
                  capacity_kwh : float = config.BESS_CAPACITY_KWH,
@@ -34,34 +20,13 @@ class RuleBasedBESSController:
         self.soc    = soc_initial
         self.energy = capacity_kwh * soc_initial   # 현재 저장 에너지 (kWh)
 
-    # ─────────────────────────────────────────────────────────────────
     # 공개 메서드
-    # ─────────────────────────────────────────────────────────────────
     def control(self,
                 load_kw  : float,
                 solar_kw : float,
                 hour     : int,
                 time_step: float = config.TIME_STEP_HOURS) -> dict:
-        """
-        1 타임스텝(1시간) 제어 결정 + 상태 업데이트
-
-        Parameters
-        ----------
-        load_kw   : 현재 부하 (kW)
-        solar_kw  : 현재 태양광 발전량 (kW)
-        hour      : 현재 시각 (0‒23)
-        time_step : 시간 간격 (시간 단위, 기본 1.0)
-
-        Returns
-        -------
-        dict
-          bess_power_kw  : BESS 출력 (양수 = 방전, 음수 = 충전, kW)
-          grid_power_kw  : 계통 전력 (양수 = 구매, 음수 = 판매, kW)
-          soc            : 제어 후 SOC (0‒1)
-          action         : 'charge' | 'discharge' | 'idle'
-          blocked        : 'overcharge' | 'overdischarge' | None
-          tariff_period  : 'on_peak' | 'mid_peak' | 'off_peak'
-        """
+        
         net_load      = load_kw - solar_kw
         tariff_period = config.get_tariff_period(hour)
 
@@ -69,7 +34,7 @@ class RuleBasedBESSController:
         action     = 'idle'
         blocked    = None
 
-        # ── Rule 1: 태양광 잉여 → 충전 ──────────────────────────────
+        # ── Rule 1: 태양광 잉여 → 충전 
         if net_load < 0:
             surplus        = -net_load
             avail_cap      = (self.soc_max - self.soc) * self.capacity
@@ -82,7 +47,7 @@ class RuleBasedBESSController:
             else:
                 blocked = 'overcharge'
 
-        # ── Rule 2: 순부하 발생 → 시간대에 따라 방전 ────────────────
+        # ── Rule 2: 순부하 발생 → 시간대에 따라 방전 
         elif net_load > 0:
             if tariff_period in ('on_peak', 'mid_peak'):
                 discharge_pw = min(net_load, self.max_power)
@@ -99,7 +64,7 @@ class RuleBasedBESSController:
             elif discharge_pw > 0:
                 blocked = 'overdischarge'
 
-        # ── Rule 3: 경부하 시간대 + idle → 계통에서 충전 ────────────
+        # ── Rule 3: 경부하 시간대 + idle → 계통에서 충전 
         if action == 'idle' and tariff_period == 'off_peak' \
                 and self.soc < self.soc_max:
             avail_cap      = (self.soc_max - self.soc) * self.capacity
@@ -109,10 +74,10 @@ class RuleBasedBESSController:
                 bess_power = -charge_pw
                 action     = 'charge'
 
-        # ── SOC 업데이트 ─────────────────────────────────────────────
+        # ── SOC 업데이트 
         self._update_soc(bess_power, time_step)
 
-        # ── 계통 전력 계산 ───────────────────────────────────────────
+        # ── 계통 전력 계산 
         # 계통 = 부하 - 태양광 - BESS 방전(+방전/-충전)
         grid_power = load_kw - solar_kw - bess_power
 
@@ -130,9 +95,7 @@ class RuleBasedBESSController:
         self.soc    = soc_initial
         self.energy = self.capacity * soc_initial
 
-    # ─────────────────────────────────────────────────────────────────
     # 내부 메서드
-    # ─────────────────────────────────────────────────────────────────
     def _update_soc(self, bess_power: float, time_step: float):
         """충·방전에 따른 SOC 갱신 (효율 손실 반영)"""
         if bess_power < 0:   # 충전
@@ -147,7 +110,6 @@ class RuleBasedBESSController:
         self.energy = self.soc * self.capacity
 
 
-# ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     ctrl = RuleBasedBESSController()
     print("=== Rule-Based 제어기 단독 테스트 ===\n")

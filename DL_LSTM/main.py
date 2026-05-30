@@ -1,28 +1,3 @@
-"""
-main.py  ─  LSTM 기반 BESS 시뮬레이션 실행 파일
-================================================
-실행 순서
----------
-1.  데이터 로드 및 피처 엔지니어링
-2.  LSTM 입력 시퀀스 생성 + Train/Val/Test 분할
-3.  LSTM 모델 학습 (또는 저장된 모델 불러오기)
-4.  예측 → 역정규화  (테스트셋 또는 1년치)
-5.  LSTM 기반 BESS 시뮬레이션
-6.  기준 시나리오 (BESS 없음) 시뮬레이션
-7.  평가 지표 계산 및 출력
-8.  결과 저장 및 시각화
-
-사용법
-------
-    python main.py
-
-옵션
-----
-  SKIP_TRAINING = True   →  저장된 모델(.pt)을 바로 사용 (학습 건너뜀)
-  FULL_YEAR     = True   →  1년치 전체 데이터로 시뮬레이션 (월별 비교용)
-                            False면 기존처럼 테스트셋(15%)만 시뮬레이션
-"""
-
 import os
 import numpy as np
 import pandas as pd
@@ -39,18 +14,13 @@ from visualizer         import (plot_training_curve, plot_prediction,
                                  plot_daily_operation, plot_soc_trend,
                                  plot_comparison, plot_radar)
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 옵션
-# ─────────────────────────────────────────────────────────────────────
 SKIP_TRAINING = True   # True → 저장된 모델(.pt) 로드 (학습 건너뜀)
 FULL_YEAR     = True   # True → 1년치 전체 시뮬레이션 (월별 비교용)
                         # False → 테스트셋(15%, 약 55일)만 시뮬레이션 (기존 동작)
 
 
-# ─────────────────────────────────────────────────────────────────────
 # 극단 사례 자동 선정 (Rule-Based main.py 와 동일 로직)
-# ─────────────────────────────────────────────────────────────────────
 def find_extreme_days(result_df: pd.DataFrame) -> dict:
     df       = result_df.copy()
     df['date'] = df['timestamp'].dt.date
@@ -74,10 +44,7 @@ def find_extreme_days(result_df: pd.DataFrame) -> dict:
         'worst_solar': {**_pick('solar_mean',False), 'label': '태양광 최소일',  'unit': 'kW'},
     }
 
-
-# ─────────────────────────────────────────────────────────────────────
 # 메인
-# ─────────────────────────────────────────────────────────────────────
 def main():
     print("=" * 62)
     if FULL_YEAR:
@@ -92,11 +59,11 @@ def main():
     os.makedirs(config.RESULT_DIR,    exist_ok=True)
     os.makedirs(config.MODEL_SAVE_DIR, exist_ok=True)
 
-    # ── 1. 데이터 로드 ─────────────────────────────────────────────
+    # ── 1. 데이터 로드 
     print("\n[1/8] 데이터 로드 및 피처 엔지니어링")
     df = load_data(config.LOAD_DATA_PATH, config.SMP_DATA_PATH)
 
-    # ── 2. 시퀀스 생성 + 분할 ─────────────────────────────────────
+    # ── 2. 시퀀스 생성 + 분할 
     print("\n[2/8] LSTM 시퀀스 생성 및 Train/Val/Test 분할")
     
     # FULL_YEAR 모드면 기존 scaler 재사용 (학습 때와 동일한 정규화 유지)
@@ -114,7 +81,7 @@ def main():
     print(f"   전체   : {X.shape}")
     print(f"   피처 수: {n_features}  →  {FEATURE_COLS}")
 
-    # ── 3. LSTM 학습 ───────────────────────────────────────────────
+    # ── 3. LSTM 학습 
     print("\n[3/8] LSTM 모델 학습")
     if SKIP_TRAINING and os.path.exists(config.MODEL_SAVE_PATH):
         print("   저장된 모델 로드 (SKIP_TRAINING=True)")
@@ -126,7 +93,7 @@ def main():
             print("   학습을 새로 진행합니다. (이미 학습된 모델이 있다면 SKIP_TRAINING=True 권장)")
         model, history = train(X_tr, y_tr, X_val, y_val, n_features)
 
-    # ── 4. 예측 (테스트셋 또는 1년치 전체) ─────────────────────────
+    # ── 4. 예측 (테스트셋 또는 1년치 전체) 
     if FULL_YEAR:
         print("\n[4/8] 1년치 전체 예측")
         y_pred_scaled = predict(model, X)
@@ -151,19 +118,19 @@ def main():
         n_val     = len(X_val)
         test_start_idx = config.SEQ_LEN + n_train + n_val
 
-    # ── 5. LSTM BESS 시뮬레이션 ────────────────────────────────────
+    # ── 5. LSTM BESS 시뮬레이션 
     print("\n[5/8] LSTM 기반 BESS 시뮬레이션")
     controller  = LSTMBESSController()
     lstm_result = run_lstm_simulation(df, y_pred_kw, test_start_idx, controller)
     print(f"   진행상태: 완료 ({len(lstm_result):,}행)")
 
-    # ── 6. 기준 시나리오 ───────────────────────────────────────────
+    # ── 6. 기준 시나리오 
     print("\n[6/8] 기준 시나리오 (BESS 없음) 시뮬레이션")
     test_df  = df.iloc[test_start_idx: test_start_idx + len(y_pred_kw)].reset_index(drop=True)
     baseline = run_baseline_simulation(test_df)
     print("   진행상태: 완료")
 
-    # ── 7. 평가 ────────────────────────────────────────────────────
+    # ── 7. 평가 
     print("\n[7/8] 평가 지표 계산")
     metrics = evaluate_all(lstm_result, baseline,
                            y_true=y_true_kw, y_pred=y_pred_kw)
@@ -173,7 +140,7 @@ def main():
     else:
         print_report(metrics)
 
-    # ── 8. 결과 저장 + 시각화 ─────────────────────────────────────
+    # ── 8. 결과 저장 + 시각화 
     print("[8/8] 결과 저장 및 시각화")
     print("-" * 60)
 

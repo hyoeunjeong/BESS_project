@@ -1,7 +1,3 @@
-"""
-check_data.py - 데이터 수집 상태 확인 도구 (12개 박스 + 비교 데이터)
-"""
-
 import sqlite3
 import os
 from pathlib import Path

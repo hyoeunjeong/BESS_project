@@ -1,9 +1,3 @@
-"""
-Swagger에서 확인한 정확한 URL로 실제 응답을 확인합니다.
-
-실행: python test_smp_api.py
-"""
-
 import json
 import requests
 from urllib.parse import unquote

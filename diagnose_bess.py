@@ -1,14 +1,3 @@
-"""
-diagnose_bess.py - BESS 동작 상태 진단 도구
-==============================================
-다음을 분석합니다:
-1. 현재 BESS 상태 (SOC, 임계값, 시간대)
-2. 제어 로직 흐름 (어떤 우선순위 조건에 걸리는지)
-3. 최근 24시간의 action 분포
-4. SOC 변화 추이
-5. 시간대별 동작 패턴
-"""
-
 import sqlite3
 import os
 from pathlib import Path

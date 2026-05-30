@@ -526,10 +526,7 @@ class RealtimeEngine:
             'forecast_base': self.forecast_base_time or '',
         }
 
-    # =================================================================
     # DB 저장 & 메인 루프
-    # =================================================================
-
     def _save_to_db(self, state: dict):
         """상태를 DB에 저장"""
         try:
