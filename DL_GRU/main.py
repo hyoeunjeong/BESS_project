@@ -1,4 +1,4 @@
-﻿import os
+import os
 import numpy as np
 import pandas as pd
 
@@ -6,16 +6,16 @@ import config
 from data_loader  import (load_data, make_sequences, split_sequences,
                            inverse_target, save_scaler, load_scaler,
                            FEATURE_COLS)
-from models.lstm_model  import train, predict, load_model
-from bess_controller    import LSTMBESSController
-from simulator          import run_lstm_simulation, run_baseline_simulation
+from models.gru_model  import train, predict, load_model
+from bess_controller    import GRUBESSController
+from simulator          import run_gru_simulation, run_baseline_simulation
 from evaluator          import evaluate_all, print_report, print_comparison
 from visualizer         import (plot_training_curve, plot_prediction,
                                  plot_daily_operation, plot_soc_trend,
                                  plot_comparison, plot_radar)
 
 # 옵션
-SKIP_TRAINING = False   # True → 저장된 모델(.pt) 로드 (학습 건너뜀)
+SKIP_TRAINING = True   # True → 저장된 모델(.pt) 로드 (학습 건너뜀)
 FULL_YEAR     = True   # True → 1년치 전체 시뮬레이션 (월별 비교용)
                         # False → 테스트셋(15%, 약 55일)만 시뮬레이션 (기존 동작)
 
@@ -48,9 +48,9 @@ def find_extreme_days(result_df: pd.DataFrame) -> dict:
 def main():
     print("=" * 62)
     if FULL_YEAR:
-        print("  LSTM 기반 BESS 충·방전 제어 시뮬레이션 [1년치 모드]")
+        print("  GRU 기반 BESS 충·방전 제어 시뮬레이션 [1년치 모드]")
     else:
-        print("  LSTM 기반 BESS 충·방전 제어 시뮬레이션 [테스트셋 모드]")
+        print("  GRU 기반 BESS 충·방전 제어 시뮬레이션 [테스트셋 모드]")
     print("  (한국전력거래소 실제 데이터 기반)")
     print("=" * 62)
     print(f"   SKIP_TRAINING = {SKIP_TRAINING}")
@@ -64,7 +64,7 @@ def main():
     df = load_data(config.LOAD_DATA_PATH, config.SMP_DATA_PATH)
 
     # ── 2. 시퀀스 생성 + 분할 
-    print("\n[2/8] LSTM 시퀀스 생성 및 Train/Val/Test 분할")
+    print("\n[2/8] GRU 시퀀스 생성 및 Train/Val/Test 분할")
     
     # FULL_YEAR 모드면 기존 scaler 재사용 (학습 때와 동일한 정규화 유지)
     if FULL_YEAR and SKIP_TRAINING and os.path.exists(config.SCALER_SAVE_PATH):
@@ -81,8 +81,8 @@ def main():
     print(f"   전체   : {X.shape}")
     print(f"   피처 수: {n_features}  →  {FEATURE_COLS}")
 
-    # ── 3. LSTM 학습 
-    print("\n[3/8] LSTM 모델 학습")
+    # ── 3. GRU 학습 
+    print("\n[3/8] GRU 모델 학습")
     if SKIP_TRAINING and os.path.exists(config.MODEL_SAVE_PATH):
         print("   저장된 모델 로드 (SKIP_TRAINING=True)")
         model   = load_model(n_features)
@@ -118,11 +118,11 @@ def main():
         n_val     = len(X_val)
         test_start_idx = config.SEQ_LEN + n_train + n_val
 
-    # ── 5. LSTM BESS 시뮬레이션 
-    print("\n[5/8] LSTM 기반 BESS 시뮬레이션")
-    controller  = LSTMBESSController()
-    lstm_result = run_lstm_simulation(df, y_pred_kw, test_start_idx, controller)
-    print(f"   진행상태: 완료 ({len(lstm_result):,}행)")
+    # ── 5. GRU BESS 시뮬레이션 
+    print("\n[5/8] GRU 기반 BESS 시뮬레이션")
+    controller  = GRUBESSController()
+    gru_result = run_gru_simulation(df, y_pred_kw, test_start_idx, controller)
+    print(f"   진행상태: 완료 ({len(gru_result):,}행)")
 
     # ── 6. 기준 시나리오 
     print("\n[6/8] 기준 시나리오 (BESS 없음) 시뮬레이션")
@@ -132,11 +132,11 @@ def main():
 
     # ── 7. 평가 
     print("\n[7/8] 평가 지표 계산")
-    metrics = evaluate_all(lstm_result, baseline,
+    metrics = evaluate_all(gru_result, baseline,
                            y_true=y_true_kw, y_pred=y_pred_kw)
     
     if FULL_YEAR:
-        print_report(metrics, title="LSTM BESS 1년치 평가 리포트")
+        print_report(metrics, title="GRU BESS 1년치 평가 리포트")
     else:
         print_report(metrics)
 
@@ -144,34 +144,34 @@ def main():
     print("[8/8] 결과 저장 및 시각화")
     print("-" * 60)
 
-    csv_path = os.path.join(config.RESULT_DIR, 'lstm_simulation_result.csv')
+    csv_path = os.path.join(config.RESULT_DIR, 'gru_simulation_result.csv')
     
     # FULL_YEAR 모드면 기존 테스트셋 결과 자동 백업
     if FULL_YEAR and os.path.exists(csv_path):
-        backup_path = os.path.join(config.RESULT_DIR, 'lstm_simulation_result_testset.csv')
+        backup_path = os.path.join(config.RESULT_DIR, 'gru_simulation_result_testset.csv')
         if not os.path.exists(backup_path):
             import shutil
             shutil.copy(csv_path, backup_path)
             print(f"   기존 테스트셋 결과 백업: {backup_path}")
     
-    lstm_result.to_csv(csv_path, index=False, encoding='utf-8-sig')
-    print(f"   CSV   : {csv_path}  ({len(lstm_result):,}행, {len(lstm_result)//24}일)")
+    gru_result.to_csv(csv_path, index=False, encoding='utf-8-sig')
+    print(f"   CSV   : {csv_path}  ({len(gru_result):,}행, {len(gru_result)//24}일)")
 
     # 학습 곡선
     if history:
         plot_training_curve(
             history,
-            save_path=os.path.join(config.RESULT_DIR, 'lstm_training_curve.png'))
+            save_path=os.path.join(config.RESULT_DIR, 'gru_training_curve.png'))
 
     # 예측 정확도
     suffix = '_yearly' if FULL_YEAR else ''
     plot_prediction(
         y_true_kw, y_pred_kw,
-        save_path=os.path.join(config.RESULT_DIR, f'lstm_prediction{suffix}.png'))
+        save_path=os.path.join(config.RESULT_DIR, f'gru_prediction{suffix}.png'))
 
     print("=" * 62)
     # 극단 사례 운영 그래프
-    extreme = find_extreme_days(lstm_result)
+    extreme = find_extreme_days(gru_result)
     print("\n   극단 사례 선정")
     print("-" * 60)
     for info in extreme.values():
@@ -193,20 +193,20 @@ def main():
     for key, tag in tag_map.items():
         info = extreme[key]
         plot_daily_operation(
-            lstm_result,
+            gru_result,
             day_idx   = info['day_idx'],
             save_path = os.path.join(config.RESULT_DIR,
                                      f'{tag}_{info["date"]}.png'))
 
-    plot_soc_trend(lstm_result,
-                   save_path=os.path.join(config.RESULT_DIR, f'lstm_soc_trend{suffix}.png'))
+    plot_soc_trend(gru_result,
+                   save_path=os.path.join(config.RESULT_DIR, f'gru_soc_trend{suffix}.png'))
     print("=" * 62)
     print(f"\n시뮬레이션 완료 → 결과 폴더: ./{config.RESULT_DIR}/")
     
     if FULL_YEAR:
         print("\n[1년치 모드] 다음 단계:")
         print("   1. cd .. (프로젝트 루트로)")
-        print("   2. python compare.py  (Rule-Based vs LSTM 1년치 비교)")
+        print("   2. python compare.py  (Rule-Based vs GRU 1년치 비교)")
         print("   3. comparison_results/comparison_metrics.csv 업데이트 확인")
     else:
         print("\n※ Rule-Based 결과와 비교하려면 아래 함수를 활용하세요:")
