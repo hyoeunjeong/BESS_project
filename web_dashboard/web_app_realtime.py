@@ -432,7 +432,7 @@ def api_comparison():
 
 
 # 1년치 진짜 비교 데이터 (comparison_metrics.csv 활용)
-YEARLY_COMPARISON_CSV = PROJECT_ROOT / 'comparison_results' / 'comparison_metrics.csv'
+YEARLY_COMPARISON_CSV = PROJECT_ROOT.parent / 'comparison_results' / 'comparison_metrics.csv'
 
 
 def get_yearly_comparison() -> dict:
@@ -615,8 +615,8 @@ def api_yearly_comparison():
 
 
 # 월별 비교 데이터 (시뮬레이션 CSV 직접 분석)
-RB_SIMULATION_CSV   = PROJECT_ROOT / 'rule_based' / 'results' / 'rb_simulation_result.csv'
-LSTM_SIMULATION_CSV = PROJECT_ROOT / 'DL_LSTM'   / 'results' / 'lstm_simulation_result.csv'
+RB_SIMULATION_CSV   = PROJECT_ROOT.parent / 'rule_based' / 'results' / 'rb_simulation_result.csv'
+LSTM_SIMULATION_CSV = PROJECT_ROOT.parent / 'DL_LSTM'   / 'results' / 'lstm_simulation_result.csv'
 
 # 월별 비교 결과 캐시 (CSV는 변하지 않으므로 1회만 계산)
 _MONTHLY_COMPARISON_CACHE = None
