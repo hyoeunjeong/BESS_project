@@ -547,8 +547,7 @@ def get_yearly_comparison() -> dict:
             metric = row.get('지표', '').strip()
             rb_raw = row.get('Rule-Based', '').strip()
             lstm_raw = row.get('LSTM', '').strip()
-            gru_raw = row.get('GRU', '').strip()
-
+            
             cat_key = CATEGORY_MAP.get(cat)
             if not cat_key:
                 continue
@@ -561,7 +560,6 @@ def get_yearly_comparison() -> dict:
             
             rb_val = _to_float(rb_raw)
             lstm_val = _to_float(lstm_raw)
-            gru_val = _to_float(gru_raw)
             
             # 우위 판정
             winner = None
@@ -586,10 +584,8 @@ def get_yearly_comparison() -> dict:
                 'name': name,
                 'rb': rb_val,
                 'lstm': lstm_val,
-                'gru': gru_val,
                 'rb_raw': rb_raw,
                 'lstm_raw': lstm_raw,
-                'gru_raw': gru_raw,
                 'unit': unit,
                 'higher_better': higher_better,
                 'fmt': fmt_type,
@@ -621,7 +617,6 @@ def api_yearly_comparison():
 # 월별 비교 데이터 (시뮬레이션 CSV 직접 분석)
 RB_SIMULATION_CSV   = PROJECT_ROOT.parent / 'rule_based' / 'results' / 'rb_simulation_result.csv'
 LSTM_SIMULATION_CSV = PROJECT_ROOT.parent / 'DL_LSTM'   / 'results' / 'lstm_simulation_result.csv'
-GRU_SIMULATION_CSV  = PROJECT_ROOT.parent / 'DL_GRU'    / 'results' / 'gru_simulation_result.csv'
 
 # 월별 비교 결과 캐시 (CSV는 변하지 않으므로 1회만 계산)
 _MONTHLY_COMPARISON_CACHE = None
@@ -725,7 +720,6 @@ def get_monthly_comparison() -> dict:
     
     rb_stats   = _compute_monthly_stats(RB_SIMULATION_CSV)
     lstm_stats = _compute_monthly_stats(LSTM_SIMULATION_CSV)
-    gru_stats  = _compute_monthly_stats(GRU_SIMULATION_CSV)
     
     if not rb_stats and not lstm_stats:
         result = {
@@ -747,7 +741,6 @@ def get_monthly_comparison() -> dict:
             'month_label': f'{m}월',
             'rb': rb_stats.get(m),
             'lstm': lstm_stats.get(m),
-            'gru': gru_stats.get(m),
             'has_both': m in common_months,
             'rb_only': m in rb_only_months,
         }
@@ -1935,50 +1928,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             return val.toString();
         }
 
-        // 세 모델 비교 요약 카드 (1등 배경색 강조)
-        function renderSummaryCards(data, targetId) {
-            const cards = [
-                { cat: 'stability', key: 'control_success_rate_pct', label: '제어 성공률' },
-                { cat: 'energy',    key: 'bess_utilization_pct',     label: 'BESS 활용률' },
-                { cat: 'energy',    key: 'self_sufficiency_pct',     label: '자립률' },
-                { cat: 'economic',  key: 'cost_saving_rate_pct',     label: '요금 절감률' },
-            ];
-            let html = '';
-            cards.forEach(c => {
-                const entry = (data[c.cat] || []).find(e => e.metric_key === c.key);
-                if (!entry) return;
-                const vals = { lstm: entry.lstm, gru: entry.gru, rb: entry.rb };
-                // 1등 판정 (값이 클수록 좋은 지표들이므로 최대값이 1등)
-                let best = null, bestVal = -Infinity;
-                ['lstm', 'gru', 'rb'].forEach(k => {
-                    if (vals[k] !== null && vals[k] !== undefined && vals[k] > bestVal) {
-                        bestVal = vals[k]; best = k;
-                    }
-                });
-                const unit = entry.unit ? ' ' + entry.unit : '';
-                const fmt = (v) => formatYearlyValue(v, entry.fmt) + unit;
-                const row = (k, name, color) => {
-                    const isBest = (k === best);
-                    const bg = isBest ? (k === 'rb' ? 'rgba(16,185,129,0.18)' : 'rgba(168,85,247,0.18)') : 'transparent';
-                    const nameColor = isBest ? (k === 'rb' ? '#6ee7b7' : '#c4a5f7') : color;
-                    const valColor = isBest ? '#fff' : '#e2e8f0';
-                    const weight = isBest ? '700' : '400';
-                    const labelWeight = isBest ? '600' : '400';
-                    return `<div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px; padding:3px 7px; border-radius:5px; background:${bg};">
-                        <span style="color:${nameColor}; font-weight:${labelWeight};">${name}</span>
-                        <span style="color:${valColor}; font-weight:${weight};">${fmt(vals[k])}</span>
-                    </div>`;
-                };
-                html += `<div class="stat-card" style="text-align:left;">
-                    <div style="font-size:11px; color:#94a3b8; margin-bottom:9px; text-align:center;">${c.label}</div>
-                    ${row('lstm', 'LSTM', '#3b82f6')}
-                    ${row('gru', 'GRU', '#a855f7')}
-                    ${row('rb', '룰', '#10b981')}
-                </div>`;
-            });
-            document.getElementById(targetId).innerHTML = html;
-        }
-        
         // 모달: 카테고리별 상세 비교 렌더링
         function renderYearlyModalContent(data) {
             if (!data || !data.available) {
@@ -1991,7 +1940,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             
             // 종합 우위 카드
             const summary = data.summary || {};
-            renderSummaryCards(data, 'comparison-summary-stats');
+            document.getElementById('comparison-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Rule-Based 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체 지표</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
             
             // 카테고리별 표
             const categories = [
@@ -2017,7 +1983,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <tr>
                                 <th style="text-align: left;">지표</th>
                                 <th style="color: #3b82f6;">LSTM</th>
-                                <th style="color: #a855f7;">GRU</th>
                                 <th style="color: #10b981;">Rule-Based</th>
                                 <th>차이</th>
                                 <th>우위</th>
@@ -2027,7 +1992,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 
                 entries.forEach(e => {
                     const lstmStr = formatYearlyValue(e.lstm, e.fmt) + (e.unit ? ' ' + e.unit : '');
-                    const gruStr  = formatYearlyValue(e.gru,  e.fmt) + (e.unit ? ' ' + e.unit : '');
                     const rbStr   = formatYearlyValue(e.rb,   e.fmt) + (e.unit ? ' ' + e.unit : '');
                     
                     let diffStr = '-';
@@ -2042,26 +2006,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         }
                     }
                     
-                    // 세 값 중 1등 열만 색 (나머지 흰색)
-                    const _vals = { lstm: e.lstm, gru: e.gru, rb: e.rb };
-                    let _best = null, _bestVal = -Infinity;
-                    ['lstm','gru','rb'].forEach(_k => {
-                        if (_vals[_k] !== null && _vals[_k] !== undefined && _vals[_k] > _bestVal) { _bestVal = _vals[_k]; _best = _k; }
-                    });
-                    const lstmColor = (_best === 'lstm') ? '#3b82f6' : '#e2e8f0';
-                    const gruColor  = (_best === 'gru')  ? '#a855f7' : '#e2e8f0';
-                    const rbColor   = (_best === 'rb')   ? '#10b981' : '#e2e8f0';
-                    // 우위 = 세 모델 1등 (빨강)
-                    const _winnerMap = { lstm: 'LSTM', gru: 'GRU', rb: 'Rule-Based' };
-                    let winnerText = _best ? _winnerMap[_best] : '-';
-                    const _winnerColorMap = { lstm: '#3b82f6', gru: '#a855f7', rb: '#10b981' };
-                    let winnerColor = _best ? _winnerColorMap[_best] : '#94a3b8';
+                    let winnerText = '-';
+                    let winnerColor = '#94a3b8';
+                    let lstmClass = '';
+                    let rbClass = '';
+                    if (e.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                    else if (e.winner === 'rb') { winnerText = 'Rule-Based'; winnerColor = '#10b981'; rbClass = 'better'; }
+                    else if (e.winner === 'equal') { winnerText = '동일'; }
                     
                     html += `<tr>
                         <td style="text-align: left; color: #cbd5e1;">${e.name}</td>
-                        <td style="color: ${lstmColor};">${lstmStr}</td>
-                        <td style="color: ${gruColor};">${gruStr}</td>
-                        <td style="color: ${rbColor};">${rbStr}</td>
+                        <td class="${lstmClass}">${lstmStr}</td>
+                        <td class="${rbClass}">${rbStr}</td>
                         <td>${diffStr}</td>
                         <td style="color: ${winnerColor};">${winnerText}</td>
                     </tr>`;
@@ -2100,16 +2056,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const labels = months.map(m => m.month_label);
             const rb_self = months.map(m => m.rb ? m.rb.self_sufficiency_pct : null);
             const ls_self = months.map(m => m.lstm ? m.lstm.self_sufficiency_pct : null);
-            const gr_self = months.map(m => m.gru ? m.gru.self_sufficiency_pct : null);
             const rb_soc  = months.map(m => m.rb ? m.rb.soc_avg_pct : null);
             const ls_soc  = months.map(m => m.lstm ? m.lstm.soc_avg_pct : null);
-            const gr_soc  = months.map(m => m.gru ? m.gru.soc_avg_pct : null);
             const rb_cyc  = months.map(m => m.rb ? m.rb.cycle_count : null);
             const ls_cyc  = months.map(m => m.lstm ? m.lstm.cycle_count : null);
-            const gr_cyc  = months.map(m => m.gru ? m.gru.cycle_count : null);
             const rb_sav  = months.map(m => m.rb ? m.rb.cost_saving_won : null);
             const ls_sav  = months.map(m => m.lstm ? m.lstm.cost_saving_won : null);
-            const gr_sav  = months.map(m => m.gru ? m.gru.cost_saving_won : null);
             
             // 정보 박스 업데이트
             if (infoBox) {
@@ -2140,7 +2092,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             };
             
-            function makeChart(canvasId, lstmData, gruData, rbData) {
+            function makeChart(canvasId, lstmData, rbData) {
                 const ctx = document.getElementById(canvasId).getContext('2d');
                 return new Chart(ctx, {
                     type: 'line',
@@ -2148,27 +2100,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         { label: 'LSTM', data: lstmData, 
                           borderColor: '#3b82f6', 
                           backgroundColor: 'rgba(59, 130, 246, 0.1)', 
-                          borderWidth: 2, tension: 0.4, fill: false, pointRadius: 4,
-                          spanGaps: true },
-                        { label: 'GRU', data: gruData, 
-                          borderColor: '#a855f7', 
-                          backgroundColor: 'rgba(168, 85, 247, 0.1)', 
-                          borderWidth: 2, tension: 0.4, fill: false, pointRadius: 4,
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4,
                           spanGaps: true },
                         { label: 'Rule-Based', data: rbData, 
                           borderColor: '#10b981', 
                           backgroundColor: 'rgba(16, 185, 129, 0.1)', 
-                          borderWidth: 2, tension: 0.4, fill: false, pointRadius: 4,
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 4,
                           spanGaps: true },
                     ]},
                     options: commonOpts
                 });
             }
             
-            comparisonCharts.selfSuff = makeChart('comparisonSelfSuffChart', ls_self, gr_self, rb_self);
-            comparisonCharts.soc      = makeChart('comparisonSocChart',      ls_soc,  gr_soc,  rb_soc);
-            comparisonCharts.cycle    = makeChart('comparisonCycleChart',    ls_cyc,  gr_cyc,  rb_cyc);
-            comparisonCharts.saving   = makeChart('comparisonSavingChart',   ls_sav,  gr_sav,  rb_sav);
+            comparisonCharts.selfSuff = makeChart('comparisonSelfSuffChart', ls_self, rb_self);
+            comparisonCharts.soc      = makeChart('comparisonSocChart',      ls_soc,  rb_soc);
+            comparisonCharts.cycle    = makeChart('comparisonCycleChart',    ls_cyc,  rb_cyc);
+            comparisonCharts.saving   = makeChart('comparisonSavingChart',   ls_sav,  rb_sav);
         }
         // ===== 비교 모달 끝 =====
 
@@ -2363,7 +2310,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             
             // 종합 우위 카드 (4개)
             const summary = data.summary || {};
-            renderSummaryCards(data, 'yearly-summary-stats');
+            document.getElementById('yearly-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Rule-Based 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체 지표</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
             
             // 핵심 지표 표
             const keyMetrics = [
@@ -2381,7 +2345,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             html += `<tr>
                 <th class="metric-name">핵심 지표</th>
                 <th style="color: #3b82f6;">LSTM</th>
-                <th style="color: #a855f7;">GRU</th>
                 <th style="color: #10b981;">Rule-Based</th>
                 <th>우위</th>
             </tr>`;
@@ -2392,29 +2355,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (!entry) return;
                 
                 const lstmStr = formatYearlyValue(entry.lstm, entry.fmt) + (entry.unit ? ' ' + entry.unit : '');
-                const gruStr  = formatYearlyValue(entry.gru,  entry.fmt) + (entry.unit ? ' ' + entry.unit : '');
                 const rbStr   = formatYearlyValue(entry.rb,   entry.fmt) + (entry.unit ? ' ' + entry.unit : '');
                 
-                // 세 값 중 1등 열만 색 (나머지 흰색)
-                const _vals = { lstm: entry.lstm, gru: entry.gru, rb: entry.rb };
-                let _best = null, _bestVal = -Infinity;
-                ['lstm','gru','rb'].forEach(_k => {
-                    if (_vals[_k] !== null && _vals[_k] !== undefined && _vals[_k] > _bestVal) { _bestVal = _vals[_k]; _best = _k; }
-                });
-                const lstmColor = (_best === 'lstm') ? '#3b82f6' : '#e2e8f0';
-                const gruColor  = (_best === 'gru')  ? '#a855f7' : '#e2e8f0';
-                const rbColor   = (_best === 'rb')   ? '#10b981' : '#e2e8f0';
-                // 우위 = 세 모델 1등 (빨강)
-                const _winnerMap = { lstm: 'LSTM', gru: 'GRU', rb: 'Rule-Based' };
-                let winnerText = _best ? _winnerMap[_best] : '-';
-                const _winnerColorMap = { lstm: '#3b82f6', gru: '#a855f7', rb: '#10b981' };
-                let winnerColor = _best ? _winnerColorMap[_best] : '#94a3b8';
+                let winnerText = '-';
+                let winnerColor = '#94a3b8';
+                let lstmClass = '';
+                let rbClass = '';
+                if (entry.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                else if (entry.winner === 'rb') { winnerText = 'Rule-Based'; winnerColor = '#10b981'; rbClass = 'better'; }
+                else if (entry.winner === 'equal') { winnerText = '동일'; }
                 
                 html += `<tr>
                     <td class="metric-name">${m.label}</td>
-                    <td style="color: ${lstmColor};">${lstmStr}</td>
-                    <td style="color: ${gruColor};">${gruStr}</td>
-                    <td style="color: ${rbColor};">${rbStr}</td>
+                    <td class="${lstmClass}">${lstmStr}</td>
+                    <td class="${rbClass}">${rbStr}</td>
                     <td style="color: ${winnerColor}; font-weight: 600;">${winnerText}</td>
                 </tr>`;
             });
@@ -3546,16 +3500,12 @@ MOBILE_HTML = """<!DOCTYPE html>
             const labels = months.map(m => m.month_label);
             const rb_self = months.map(m => m.rb ? m.rb.self_sufficiency_pct : null);
             const ls_self = months.map(m => m.lstm ? m.lstm.self_sufficiency_pct : null);
-            const gr_self = months.map(m => m.gru ? m.gru.self_sufficiency_pct : null);
             const rb_soc  = months.map(m => m.rb ? m.rb.soc_avg_pct : null);
             const ls_soc  = months.map(m => m.lstm ? m.lstm.soc_avg_pct : null);
-            const gr_soc  = months.map(m => m.gru ? m.gru.soc_avg_pct : null);
             const rb_cyc  = months.map(m => m.rb ? m.rb.cycle_count : null);
             const ls_cyc  = months.map(m => m.lstm ? m.lstm.cycle_count : null);
-            const gr_cyc  = months.map(m => m.gru ? m.gru.cycle_count : null);
             const rb_sav  = months.map(m => m.rb ? m.rb.cost_saving_won : null);
             const ls_sav  = months.map(m => m.lstm ? m.lstm.cost_saving_won : null);
-            const gr_sav  = months.map(m => m.gru ? m.gru.cost_saving_won : null);
             
             // 정보 박스 업데이트
             if (infoBox) {
@@ -3586,7 +3536,7 @@ MOBILE_HTML = """<!DOCTYPE html>
                 }
             };
             
-            function makeChart(canvasId, lstmData, gruData, rbData) {
+            function makeChart(canvasId, lstmData, rbData) {
                 const ctx = document.getElementById(canvasId).getContext('2d');
                 return new Chart(ctx, {
                     type: 'line',
@@ -3594,31 +3544,24 @@ MOBILE_HTML = """<!DOCTYPE html>
                         { label: 'LSTM', data: lstmData, 
                           borderColor: '#3b82f6', 
                           backgroundColor: 'rgba(59, 130, 246, 0.1)', 
-                          borderWidth: 2, tension: 0.4, fill: false, pointRadius: 3,
-                          spanGaps: true },
-                        { label: 'GRU', data: gruData, 
-                          borderColor: '#a855f7', 
-                          backgroundColor: 'rgba(168, 85, 247, 0.1)', 
-                          borderWidth: 2, tension: 0.4, fill: false, pointRadius: 3,
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3,
                           spanGaps: true },
                         { label: 'Rule-Based', data: rbData, 
                           borderColor: '#10b981', 
                           backgroundColor: 'rgba(16, 185, 129, 0.1)', 
-                          borderWidth: 2, tension: 0.4, fill: false, pointRadius: 3,
+                          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3,
                           spanGaps: true },
                     ]},
                     options: commonOpts
                 });
             }
             
-            comparisonCharts.selfSuff = makeChart('comparisonSelfSuffChart', ls_self, gr_self, rb_self);
-            comparisonCharts.soc      = makeChart('comparisonSocChart',      ls_soc,  gr_soc,  rb_soc);
-            comparisonCharts.cycle    = makeChart('comparisonCycleChart',    ls_cyc,  gr_cyc,  rb_cyc);
-            comparisonCharts.saving   = makeChart('comparisonSavingChart',   ls_sav,  gr_sav,  rb_sav);
+            comparisonCharts.selfSuff = makeChart('comparisonSelfSuffChart', ls_self, rb_self);
+            comparisonCharts.soc      = makeChart('comparisonSocChart',      ls_soc,  rb_soc);
+            comparisonCharts.cycle    = makeChart('comparisonCycleChart',    ls_cyc,  rb_cyc);
+            comparisonCharts.saving   = makeChart('comparisonSavingChart',   ls_sav,  rb_sav);
         }
 
-        // 숫자 포맷 (원/정수/소수)
-        // 세 모델 비교 요약 카드 (1등 배경색 강조)
         // 숫자 포맷 (원/정수/소수)
         function formatYearlyValue(val, fmt) {
             if (val === null || val === undefined) return '-';
@@ -3626,48 +3569,6 @@ MOBILE_HTML = """<!DOCTYPE html>
             if (fmt === 'float2') return val.toFixed(2);
             if (fmt === 'float3') return val.toFixed(3);
             return val.toString();
-        }
-        
-        function renderSummaryCards(data, targetId) {
-            const cards = [
-                { cat: 'stability', key: 'control_success_rate_pct', label: '제어 성공률' },
-                { cat: 'energy',    key: 'bess_utilization_pct',     label: 'BESS 활용률' },
-                { cat: 'energy',    key: 'self_sufficiency_pct',     label: '자립률' },
-                { cat: 'economic',  key: 'cost_saving_rate_pct',     label: '요금 절감률' },
-            ];
-            let html = '';
-            cards.forEach(c => {
-                const entry = (data[c.cat] || []).find(e => e.metric_key === c.key);
-                if (!entry) return;
-                const vals = { lstm: entry.lstm, gru: entry.gru, rb: entry.rb };
-                let best = null, bestVal = -Infinity;
-                ['lstm', 'gru', 'rb'].forEach(k => {
-                    if (vals[k] !== null && vals[k] !== undefined && vals[k] > bestVal) {
-                        bestVal = vals[k]; best = k;
-                    }
-                });
-                const unit = entry.unit ? ' ' + entry.unit : '';
-                const fmt = (v) => formatYearlyValue(v, entry.fmt) + unit;
-                const row = (k, name, color) => {
-                    const isBest = (k === best);
-                    const bg = isBest ? (k === 'rb' ? 'rgba(16,185,129,0.18)' : 'rgba(168,85,247,0.18)') : 'transparent';
-                    const nameColor = isBest ? (k === 'rb' ? '#6ee7b7' : '#c4a5f7') : color;
-                    const valColor = isBest ? '#fff' : '#e2e8f0';
-                    const weight = isBest ? '700' : '400';
-                    const labelWeight = isBest ? '600' : '400';
-                    return `<div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px; padding:2px 6px; border-radius:5px; background:${bg};">
-                        <span style="color:${nameColor}; font-weight:${labelWeight};">${name}</span>
-                        <span style="color:${valColor}; font-weight:${weight};">${fmt(vals[k])}</span>
-                    </div>`;
-                };
-                html += `<div class="stat-card" style="text-align:left;">
-                    <div style="font-size:10px; color:#94a3b8; margin-bottom:7px; text-align:center;">${c.label}</div>
-                    ${row('lstm', 'LSTM', '#3b82f6')}
-                    ${row('gru', 'GRU', '#a855f7')}
-                    ${row('rb', '룰', '#10b981')}
-                </div>`;
-            });
-            document.getElementById(targetId).innerHTML = html;
         }
 
         // 모달: 카테고리별 상세 비교 렌더링
@@ -3682,8 +3583,24 @@ MOBILE_HTML = """<!DOCTYPE html>
             
             // 종합 우위 카드
             const summary = data.summary || {};
-            
-            renderSummaryCards(data, 'comparison-summary-stats');
+            document.getElementById('comparison-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Rule-Based 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체 지표</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
             
             // 카테고리별 표
             const categories = [
@@ -3709,7 +3626,6 @@ MOBILE_HTML = """<!DOCTYPE html>
                             <tr>
                                 <th style="text-align: left;">지표</th>
                                 <th style="color: #3b82f6;">LSTM</th>
-                                <th style="color: #a855f7;">GRU</th>
                                 <th style="color: #10b981;">Rule-Based</th>
                                 <th>차이</th>
                                 <th>우위</th>
@@ -3719,7 +3635,6 @@ MOBILE_HTML = """<!DOCTYPE html>
                 
                 entries.forEach(e => {
                     const lstmStr = formatYearlyValue(e.lstm, e.fmt) + (e.unit ? ' ' + e.unit : '');
-                    const gruStr  = formatYearlyValue(e.gru,  e.fmt) + (e.unit ? ' ' + e.unit : '');
                     const rbStr   = formatYearlyValue(e.rb,   e.fmt) + (e.unit ? ' ' + e.unit : '');
                     
                     let diffStr = '-';
@@ -3734,26 +3649,18 @@ MOBILE_HTML = """<!DOCTYPE html>
                         }
                     }
                     
-                    // 세 값 중 1등 열만 색 (나머지 흰색)
-                    const _vals = { lstm: e.lstm, gru: e.gru, rb: e.rb };
-                    let _best = null, _bestVal = -Infinity;
-                    ['lstm','gru','rb'].forEach(_k => {
-                        if (_vals[_k] !== null && _vals[_k] !== undefined && _vals[_k] > _bestVal) { _bestVal = _vals[_k]; _best = _k; }
-                    });
-                    const lstmColor = (_best === 'lstm') ? '#3b82f6' : '#e2e8f0';
-                    const gruColor  = (_best === 'gru')  ? '#a855f7' : '#e2e8f0';
-                    const rbColor   = (_best === 'rb')   ? '#10b981' : '#e2e8f0';
-                    // 우위 = 세 모델 1등 (빨강)
-                    const _winnerMap = { lstm: 'LSTM', gru: 'GRU', rb: 'Rule-Based' };
-                    let winnerText = _best ? _winnerMap[_best] : '-';
-                    const _winnerColorMap = { lstm: '#3b82f6', gru: '#a855f7', rb: '#10b981' };
-                    let winnerColor = _best ? _winnerColorMap[_best] : '#94a3b8';
+                    let winnerText = '-';
+                    let winnerColor = '#94a3b8';
+                    let lstmClass = '';
+                    let rbClass = '';
+                    if (e.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                    else if (e.winner === 'rb') { winnerText = 'Rule-Based'; winnerColor = '#10b981'; rbClass = 'better'; }
+                    else if (e.winner === 'equal') { winnerText = '동일'; }
                     
                     html += `<tr>
                         <td style="text-align: left; color: #cbd5e1;">${e.name}</td>
-                        <td style="color: ${lstmColor};">${lstmStr}</td>
-                        <td style="color: ${gruColor};">${gruStr}</td>
-                        <td style="color: ${rbColor};">${rbStr}</td>
+                        <td class="${lstmClass}">${lstmStr}</td>
+                        <td class="${rbClass}">${rbStr}</td>
                         <td>${diffStr}</td>
                         <td style="color: ${winnerColor};">${winnerText}</td>
                     </tr>`;
@@ -3787,7 +3694,24 @@ MOBILE_HTML = """<!DOCTYPE html>
             
             // 종합 우위 (페이지 상단 4개 카드)
             const summary = data.summary || {};
-            renderSummaryCards(data, 'yearly-summary-stats');
+            document.getElementById('yearly-summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">LSTM 우위</div>
+                    <div class="stat-value" style="color: #3b82f6;">${summary.lstm_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">RB 우위</div>
+                    <div class="stat-value" style="color: #10b981;">${summary.rb_wins || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">동일</div>
+                    <div class="stat-value" style="color: #94a3b8;">${summary.equals || 0}개</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">전체</div>
+                    <div class="stat-value" style="color: #f59e0b;">${summary.total || 0}개</div>
+                </div>
+            `;
             
             // 핵심 지표만 간략 표시 (페이지 4에서)
             const keyMetrics = [
@@ -3804,10 +3728,9 @@ MOBILE_HTML = """<!DOCTYPE html>
             let html = '<table style="width: 100%; font-size: 0.75em;">';
             html += `<tr>
                 <th style="text-align: left;">핵심 지표</th>
-                <th style="text-align: center; color: #3b82f6;">LSTM</th>
-                <th style="text-align: center; color: #a855f7;">GRU</th>
-                <th style="text-align: center; color: #10b981;">RB</th>
-                <th style="text-align: center;">우위</th>
+                <th style="color: #3b82f6;">LSTM</th>
+                <th style="color: #10b981;">RB</th>
+                <th>우위</th>
             </tr>`;
             
             keyMetrics.forEach(m => {
@@ -3817,32 +3740,22 @@ MOBILE_HTML = """<!DOCTYPE html>
                 
                 const lstmStr = formatYearlyValue(entry.lstm, entry.fmt) + 
                                 (entry.unit ? ' ' + entry.unit : '');
-                const gruStr = formatYearlyValue(entry.gru, entry.fmt) + 
-                               (entry.unit ? ' ' + entry.unit : '');
                 const rbStr = formatYearlyValue(entry.rb, entry.fmt) + 
                               (entry.unit ? ' ' + entry.unit : '');
                 
-                // 세 값 중 1등 열만 색 (나머지 흰색)
-                const _vals = { lstm: entry.lstm, gru: entry.gru, rb: entry.rb };
-                let _best = null, _bestVal = -Infinity;
-                ['lstm','gru','rb'].forEach(_k => {
-                    if (_vals[_k] !== null && _vals[_k] !== undefined && _vals[_k] > _bestVal) { _bestVal = _vals[_k]; _best = _k; }
-                });
-                const lstmColor = (_best === 'lstm') ? '#3b82f6' : '#e2e8f0';
-                const gruColor  = (_best === 'gru')  ? '#a855f7' : '#e2e8f0';
-                const rbColor   = (_best === 'rb')   ? '#10b981' : '#e2e8f0';
-                // 우위 = 세 모델 1등 (빨강, 모바일 약어)
-                const _winnerMap = { lstm: 'LSTM', gru: 'GRU', rb: 'RB' };
-                let winnerText = _best ? _winnerMap[_best] : '-';
-                const _winnerColorMap = { lstm: '#3b82f6', gru: '#a855f7', rb: '#10b981' };
-                let winnerColor = _best ? _winnerColorMap[_best] : '#94a3b8';
+                let winnerText = '-';
+                let winnerColor = '#94a3b8';
+                let lstmClass = '';
+                let rbClass = '';
+                if (entry.winner === 'lstm') { winnerText = 'LSTM'; winnerColor = '#3b82f6'; lstmClass = 'better'; }
+                else if (entry.winner === 'rb') { winnerText = 'RB'; winnerColor = '#10b981'; rbClass = 'better'; }
+                else if (entry.winner === 'equal') { winnerText = '='; }
                 
                 html += `<tr>
                     <td style="text-align: left; color: #cbd5e1; padding: 6px 4px;">${m.label}</td>
-                    <td style="text-align: center; color: ${lstmColor}; padding: 6px 4px;">${lstmStr}</td>
-                    <td style="text-align: center; color: ${gruColor}; padding: 6px 4px;">${gruStr}</td>
-                    <td style="text-align: center; color: ${rbColor}; padding: 6px 4px;">${rbStr}</td>
-                    <td style="text-align: center; color: ${winnerColor}; padding: 6px 4px; font-weight: 600;">${winnerText}</td>
+                    <td class="${lstmClass}" style="padding: 6px 4px;">${lstmStr}</td>
+                    <td class="${rbClass}" style="padding: 6px 4px;">${rbStr}</td>
+                    <td style="color: ${winnerColor}; padding: 6px 4px; font-weight: 600;">${winnerText}</td>
                 </tr>`;
             });
             

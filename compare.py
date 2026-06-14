@@ -6,6 +6,7 @@ import pandas as pd
 # 경로 설정 — DL_LSTM 폴더의 모듈(config, evaluator)을 import 가능하게 함
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _LSTM_DIR = os.path.join(_THIS_DIR, 'DL_LSTM')
+_GRU_DIR  = os.path.join(_THIS_DIR, 'DL_GRU')
 _RB_DIR   = os.path.join(_THIS_DIR, 'rule_based')
 
 # DL_LSTM 폴더를 sys.path 최우선으로 추가
@@ -19,6 +20,7 @@ from evaluator import evaluate_all, _display_width, _pad
 # ── 경로 설정 
 RB_CSV   = os.path.join(_RB_DIR,   'results', 'rb_simulation_result.csv')
 LSTM_CSV = os.path.join(_LSTM_DIR, 'results', 'lstm_simulation_result.csv')
+GRU_CSV  = os.path.join(_GRU_DIR,  'results', 'gru_simulation_result.csv')
 OUT_DIR  = os.path.join(_THIS_DIR, 'comparison_results')
 
 
@@ -481,9 +483,17 @@ def print_superiority(analysis: dict):
 
 
 # CSV 저장
-def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
-    """비교 결과를 CSV로 저장 (long format)"""
+def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str, gru_m: dict = None):
+    """비교 결과를 CSV로 저장 (long format). gru_m 이 있으면 GRU 컬럼 추가."""
     rows = []
+
+    def _gru(cat, k, sub_period=None, sub_k=None):
+        """GRU 값 추출 (없으면 None)"""
+        if gru_m is None:
+            return None
+        if sub_period is not None:
+            return gru_m.get('economic', {}).get('breakdown', {}).get(sub_period, {}).get(sub_k)
+        return gru_m.get(cat, {}).get(k)
 
     # 경제적 효율
     for k, v in rb_m['economic'].items():
@@ -495,6 +505,7 @@ def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
                         '지표'    : f'{period}_{sub_k}',
                         'Rule-Based': sub_v,
                         'LSTM'    : dl_m['economic']['breakdown'].get(period, {}).get(sub_k, None),
+                        'GRU'     : _gru('economic', None, period, sub_k),
                     })
         else:
             rows.append({
@@ -502,6 +513,7 @@ def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
                 '지표'    : k,
                 'Rule-Based': v,
                 'LSTM'    : dl_m['economic'].get(k),
+                'GRU'     : _gru('economic', k),
             })
 
     # 에너지 효율
@@ -511,6 +523,7 @@ def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
             '지표'    : k,
             'Rule-Based': v,
             'LSTM'    : dl_m['energy'].get(k),
+            'GRU'     : _gru('energy', k),
         })
 
     # 운영 안정성
@@ -520,9 +533,10 @@ def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
             '지표'    : k,
             'Rule-Based': v,
             'LSTM'    : dl_m['stability'].get(k),
+            'GRU'     : _gru('stability', k),
         })
 
-    # LSTM 예측 (참고)
+    # 예측 성능 (참고) — LSTM, GRU
     if 'prediction' in dl_m:
         for k, v in dl_m['prediction'].items():
             rows.append({
@@ -530,6 +544,7 @@ def save_comparison_csv(rb_m: dict, dl_m: dict, out_path: str):
                 '지표'    : k,
                 'Rule-Based': '-',
                 'LSTM'    : v,
+                'GRU'     : _gru('prediction', k),
             })
 
     pd.DataFrame(rows).to_csv(out_path, index=False, encoding='utf-8-sig')
@@ -548,12 +563,20 @@ def main():
 
     rb_df   = pd.read_csv(RB_CSV,   parse_dates=['timestamp'])
     lstm_df = pd.read_csv(LSTM_CSV, parse_dates=['timestamp'])
+    gru_df  = pd.read_csv(GRU_CSV,  parse_dates=['timestamp']) if os.path.exists(GRU_CSV) else None
 
-    # 공통 기간으로 맞추기
-    start = max(rb_df['timestamp'].min(), lstm_df['timestamp'].min())
-    end   = min(rb_df['timestamp'].max(), lstm_df['timestamp'].max())
+    # 공통 기간으로 맞추기 (GRU 포함)
+    starts = [rb_df['timestamp'].min(), lstm_df['timestamp'].min()]
+    ends   = [rb_df['timestamp'].max(), lstm_df['timestamp'].max()]
+    if gru_df is not None:
+        starts.append(gru_df['timestamp'].min())
+        ends.append(gru_df['timestamp'].max())
+    start = max(starts)
+    end   = min(ends)
     rb_df   = rb_df[(rb_df['timestamp']   >= start) & (rb_df['timestamp']   <= end)].reset_index(drop=True)
     lstm_df = lstm_df[(lstm_df['timestamp'] >= start) & (lstm_df['timestamp'] <= end)].reset_index(drop=True)
+    if gru_df is not None:
+        gru_df = gru_df[(gru_df['timestamp'] >= start) & (gru_df['timestamp'] <= end)].reset_index(drop=True)
     print(f"\n비교 기간: {start.date()} ~ {end.date()}  ({len(rb_df)//24}일, {len(rb_df):,}h)")
 
     # Baseline 구성 (각각의 시뮬레이션 결과로부터)
@@ -570,6 +593,16 @@ def main():
              if 'predicted_net_load_kw' in lstm_df.columns else None
     dl_metrics = evaluate_all(lstm_df, lstm_base, y_true=y_true, y_pred=y_pred)
 
+    # GRU 평가 (CSV 에 GRU 컬럼 추가용)
+    gru_metrics = None
+    if gru_df is not None:
+        gru_base = build_baseline(gru_df)
+        g_true = gru_df['load_kw'].values - gru_df['solar_kw'].values \
+                 if 'load_kw' in gru_df.columns else None
+        g_pred = gru_df['predicted_net_load_kw'].values \
+                 if 'predicted_net_load_kw' in gru_df.columns else None
+        gru_metrics = evaluate_all(gru_df, gru_base, y_true=g_true, y_pred=g_pred)
+
     # 비교 표 출력
     print_comparison_table(rb_metrics, dl_metrics)
 
@@ -580,7 +613,7 @@ def main():
     # CSV 저장
     os.makedirs(OUT_DIR, exist_ok=True)
     out_csv = os.path.join(OUT_DIR, 'comparison_metrics.csv')
-    save_comparison_csv(rb_metrics, dl_metrics, out_csv)
+    save_comparison_csv(rb_metrics, dl_metrics, out_csv, gru_m=gru_metrics)
     print(f"비교 결과 저장: {out_csv}\n")
 
 

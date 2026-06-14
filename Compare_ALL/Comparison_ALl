@@ -1,0 +1,336 @@
+"""
+compare_all.py  ─  Rule-Based vs LSTM vs GRU 통합 비교
+=====================================================
+세 모델의 시뮬레이션 결과 CSV를 읽어 동일 조건에서 비교한다.
+
+- 타임스탬프 교집합으로 세 모델을 완전히 동일한 시점으로 맞춤 (공정 비교)
+- 경제성 / 에너지효율 / 운영안정성 / 예측성능 지표 계산
+- 콘솔 비교표 출력 + CSV 저장 + 그래프(막대·레이더) 저장
+
+실행: py -3.12 compare_all.py
+"""
+
+import os
+import sys
+import platform
+import numpy as np
+import pandas as pd
+import matplotlib
+import matplotlib.pyplot as plt
+
+
+# =====================================================================
+# 경로 설정
+# ---------------------------------------------------------------------
+# 이 파일(Compare_All/compare_all.py) 기준 상위 폴더가 프로젝트 루트
+# =====================================================================
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT     = os.path.dirname(_THIS_DIR)
+
+CSV_PATHS = {
+    'Rule-Based': os.path.join(_ROOT, 'rule_based', 'results', 'rb_simulation_result.csv'),
+    'LSTM':       os.path.join(_ROOT, 'DL_LSTM',    'results', 'lstm_simulation_result.csv'),
+    'GRU':        os.path.join(_ROOT, 'DL_GRU',     'results', 'gru_simulation_result.csv'),
+}
+
+OUT_DIR = os.path.join(_THIS_DIR, 'comparison_output')
+
+# BESS 사양 (세 모델 공통)
+BESS_MAX_POWER_KW = 25.0
+BESS_CAPACITY_KWH = 100.0
+
+# 한글 폰트
+_FONT = {'Windows': 'Malgun Gothic', 'Darwin': 'AppleGothic'}.get(platform.system(), 'DejaVu Sans')
+matplotlib.rc('font', family=_FONT)
+matplotlib.rcParams['axes.unicode_minus'] = False
+
+
+# =====================================================================
+# 데이터 로드 + 공통 시점 정렬
+# =====================================================================
+def load_aligned():
+    """세 CSV를 읽어 타임스탬프 교집합으로 정렬 (완전 동일 시점 비교)"""
+    dfs = {}
+    for name, path in CSV_PATHS.items():
+        if not os.path.exists(path):
+            print(f"[오류] {name} 결과 파일 없음: {path}")
+            print(f"       해당 폴더에서 main.py를 먼저 실행하세요.")
+            sys.exit(1)
+        dfs[name] = pd.read_csv(path, parse_dates=['timestamp'])
+
+    # 타임스탬프 교집합
+    common = None
+    for df in dfs.values():
+        s = set(df['timestamp'])
+        common = s if common is None else (common & s)
+
+    for name in dfs:
+        dfs[name] = (dfs[name][dfs[name]['timestamp'].isin(common)]
+                     .sort_values('timestamp').reset_index(drop=True))
+
+    n = len(next(iter(dfs.values())))
+    start = min(common); end = max(common)
+    print(f"[정렬] 공통 시점 {n:,}개로 통일  ({start.date()} ~ {end.date()})")
+    return dfs
+
+
+# =====================================================================
+# 지표 계산
+# =====================================================================
+def compute_metrics(df: pd.DataFrame) -> dict:
+    ts = 1.0
+    m = {}
+
+    # ── 경제성 ──
+    grid_buy  = df['grid_power_kw'].clip(lower=0)
+    bess_cost = (grid_buy * df['tariff_rate'] * ts).sum()
+    base_grid = (df['load_kw'] - df['solar_kw']).clip(lower=0)
+    base_cost = (base_grid * df['tariff_rate'] * ts).sum()
+    m['기준요금(원)']     = base_cost
+    m['BESS요금(원)']     = bess_cost
+    m['절감액(원)']       = base_cost - bess_cost
+    m['요금절감률(%)']    = (base_cost - bess_cost) / base_cost * 100
+
+    on = df[df['tariff_period'] == 'on_peak']
+    on_base = ((on['load_kw'] - on['solar_kw']).clip(lower=0) * on['tariff_rate']).sum()
+    on_bess = (on['grid_power_kw'].clip(lower=0) * on['tariff_rate']).sum()
+    m['피크요금절감률(%)'] = (on_base - on_bess) / on_base * 100 if on_base > 0 else 0.0
+
+    # ── 에너지 ──
+    total_load   = df['load_kw'].sum()
+    total_solar  = df['solar_kw'].sum()
+    discharge    = df['discharge_kw'].sum()
+    charge       = df['charge_kw'].sum()
+    direct_solar = np.minimum(df['solar_kw'], df['load_kw']).sum()
+    m['총부하(kWh)']       = total_load
+    m['총태양광(kWh)']     = total_solar
+    m['BESS방전(kWh)']     = discharge
+    m['자립률(%)']         = (direct_solar + discharge) / total_load * 100 if total_load > 0 else 0.0
+    m['BESS활용률(%)']     = (charge + discharge) / (BESS_MAX_POWER_KW * len(df)) * 100
+    m['라운드트립효율(%)'] = discharge / charge * 100 if charge > 0 else 0.0
+
+    # ── 안정성 ──
+    m['제어성공률(%)']   = ((df['soc'] >= 0.20) & (df['soc'] <= 0.80)).sum() / len(df) * 100
+    m['배터리사이클']     = (charge + discharge) / (2 * BESS_CAPACITY_KWH)
+    m['충전횟수']         = int((df['action'] == 'charge').sum())
+    m['방전횟수']         = int((df['action'] == 'discharge').sum())
+    m['평균SOC(%)']       = df['soc'].mean() * 100
+
+    # ── 예측 성능 (딥러닝만) ──
+    if 'predicted_net_load_kw' in df.columns:
+        y_true = (df['load_kw'] - df['solar_kw']).clip(lower=0).values
+        y_pred = df['predicted_net_load_kw'].values
+        m['MAE(kW)']  = np.mean(np.abs(y_true - y_pred))
+        m['RMSE(kW)'] = np.sqrt(np.mean((y_true - y_pred) ** 2))
+        nz = y_true != 0
+        m['MAPE(%)']  = np.mean(np.abs((y_true[nz] - y_pred[nz]) / y_true[nz])) * 100
+    else:
+        m['MAE(kW)'] = m['RMSE(kW)'] = m['MAPE(%)'] = None
+
+    return m
+
+
+# =====================================================================
+# 콘솔 출력
+# =====================================================================
+def _disp_width(s: str) -> int:
+    """한글=2칸, 그 외=1칸으로 표시 너비 계산"""
+    return sum(2 if ord(c) > 127 else 1 for c in str(s))
+
+
+def _pad(s: str, width: int, align: str = 'left') -> str:
+    """한글 너비를 고려한 패딩"""
+    s = str(s)
+    gap = max(0, width - _disp_width(s))
+    return s + ' ' * gap if align == 'left' else ' ' * gap + s
+
+
+def print_table(results: dict):
+    models = list(results.keys())   # ['Rule-Based','LSTM','GRU']
+    sep = "=" * 76
+    LW, CW = 20, 14   # 라벨 너비, 컬럼 너비
+
+    NAME_W = 14   # 라벨 이름 너비 (단위 괄호 세로 정렬용)
+
+    def row(name, unit, key, fmt='{:,.2f}'):
+        label = _pad(name, NAME_W) + unit          # 이름(고정폭) + 단위
+        line = "  " + _pad(label, LW)
+        for mdl in models:
+            v = results[mdl].get(key)
+            cell = '-' if v is None else fmt.format(v).strip()
+            line += _pad(cell, CW, 'right')
+        print(line)
+
+    print("\n" + sep)
+    print(f"  세 모델 비교  (Rule-Based vs LSTM vs GRU)")
+    print(sep)
+    header = "  " + _pad('지표', LW) + "".join(_pad(m, CW, 'right') for m in models)
+    print(header)
+    print("-" * 76)
+
+    print("\n  [예측 성능]")
+    row('MAE',          '(kW)',  'MAE(kW)',  '{:.3f}')
+    row('RMSE',         '(kW)',  'RMSE(kW)', '{:.3f}')
+    row('MAPE',         '(%)',   'MAPE(%)',  '{:.2f}')
+
+    print("\n  [경제적 효율]")
+    row('요금절감률',    '(%)',   '요금절감률(%)')
+    row('피크요금절감',  '(%)',   '피크요금절감률(%)')
+    row('절감액',        '(원)',  '절감액(원)', '{:,.0f}')
+
+    print("\n  [에너지 효율]")
+    row('자립률',        '(%)',   '자립률(%)')
+    row('BESS활용률',    '(%)',   'BESS활용률(%)')
+    row('라운드트립',    '(%)',   '라운드트립효율(%)')
+    row('총태양광',      '(kWh)', '총태양광(kWh)', '{:,.0f}')
+
+    print("\n  [운영 안정성]")
+    row('제어성공률',    '(%)',   '제어성공률(%)')
+    row('배터리사이클',  '',      '배터리사이클')
+    row('평균SOC',       '(%)',   '평균SOC(%)')
+
+    print("\n" + sep + "\n")
+
+
+# =====================================================================
+# CSV 저장
+# =====================================================================
+def save_csv(results: dict, out_dir: str):
+    os.makedirs(out_dir, exist_ok=True)
+    df = pd.DataFrame(results)            # 행=지표, 열=모델
+    df.index.name = '지표'
+    path = os.path.join(out_dir, 'comparison_all_metrics.csv')
+    df.to_csv(path, encoding='utf-8-sig')
+    print(f"[저장] 비교표 CSV : {path}")
+    return path
+
+
+# =====================================================================
+# 그래프 1: 핵심 지표 막대 비교
+# =====================================================================
+def plot_bars(results: dict, out_dir: str):
+    models = list(results.keys())
+    metrics = [
+        ('요금절감률(%)',     '요금 절감률'),
+        ('피크요금절감률(%)', '피크요금 절감률'),
+        ('자립률(%)',         '자립률'),
+        ('BESS활용률(%)',     'BESS 활용률'),
+        ('제어성공률(%)',     '제어 성공률'),
+    ]
+    labels = [m[1] for m in metrics]
+    x = np.arange(len(labels))
+    w = 0.25
+    colors = {'Rule-Based': '#ff6b6b', 'LSTM': '#339af0', 'GRU': '#51cf66'}
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+    for i, mdl in enumerate(models):
+        vals = [results[mdl][k] for k, _ in metrics]
+        bars = ax.bar(x + (i - 1) * w, vals, w, label=mdl,
+                      color=colors.get(mdl), alpha=0.88)
+        for b in bars:
+            ax.text(b.get_x() + b.get_width()/2, b.get_height() + 0.5,
+                    f"{b.get_height():.1f}", ha='center', va='bottom', fontsize=8)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=11)
+    ax.set_ylabel('값 (%)')
+    ax.set_title('Rule-Based vs LSTM vs GRU  ─  BESS 제어 성능 비교',
+                 fontsize=13, fontweight='bold')
+    ax.legend(fontsize=11)
+    ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(out_dir, 'comparison_bars.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[저장] 막대 그래프 : {path}")
+
+
+# =====================================================================
+# 그래프 2: 예측 성능 막대 (LSTM vs GRU)
+# =====================================================================
+def plot_prediction(results: dict, out_dir: str):
+    dl = [m for m in results if results[m].get('MAE(kW)') is not None]
+    if len(dl) < 1:
+        return
+    metrics = [('MAE(kW)', 'MAE'), ('RMSE(kW)', 'RMSE'), ('MAPE(%)', 'MAPE')]
+    labels = [m[1] for m in metrics]
+    x = np.arange(len(labels))
+    w = 0.35
+    colors = {'LSTM': '#339af0', 'GRU': '#51cf66'}
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for i, mdl in enumerate(dl):
+        vals = [results[mdl][k] for k, _ in metrics]
+        bars = ax.bar(x + (i - 0.5) * w, vals, w, label=mdl,
+                      color=colors.get(mdl), alpha=0.88)
+        for b in bars:
+            ax.text(b.get_x() + b.get_width()/2, b.get_height() + 0.05,
+                    f"{b.get_height():.2f}", ha='center', va='bottom', fontsize=9)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=11)
+    ax.set_ylabel('오차')
+    ax.set_title('예측 성능 비교 (LSTM vs GRU)', fontsize=13, fontweight='bold')
+    ax.legend(fontsize=11)
+    ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(out_dir, 'comparison_prediction.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[저장] 예측성능 그래프 : {path}")
+
+
+# =====================================================================
+# 그래프 3: 레이더 차트
+# =====================================================================
+def plot_radar(results: dict, out_dir: str):
+    models = list(results.keys())
+    cats = ['요금절감률', '피크요금절감', '자립률', 'BESS활용률', '제어성공률']
+    keys = ['요금절감률(%)', '피크요금절감률(%)', '자립률(%)', 'BESS활용률(%)', '제어성공률(%)']
+
+    # 0~100 정규화 (지표별 최대값 기준)
+    maxv = {k: max(results[m][k] for m in models) for k in keys}
+    angles = np.linspace(0, 2*np.pi, len(cats), endpoint=False).tolist()
+    angles += angles[:1]
+
+    colors = {'Rule-Based': '#ff6b6b', 'LSTM': '#339af0', 'GRU': '#51cf66'}
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw={'polar': True})
+    for mdl in models:
+        vals = [results[mdl][k] / maxv[k] * 100 if maxv[k] > 0 else 0 for k in keys]
+        vals += vals[:1]
+        ax.plot(angles, vals, 'o-', lw=2, label=mdl, color=colors.get(mdl))
+        ax.fill(angles, vals, alpha=0.08, color=colors.get(mdl))
+    ax.set_thetagrids(np.degrees(angles[:-1]), cats)
+    ax.set_title('종합 성능 비교 (레이더, 지표별 최대값=100 정규화)',
+                 fontweight='bold', pad=18)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.25, 1.1))
+    plt.tight_layout()
+    path = os.path.join(out_dir, 'comparison_radar.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[저장] 레이더 그래프 : {path}")
+
+
+# =====================================================================
+# 메인
+# =====================================================================
+def main():
+    print("=" * 76)
+    print("  BESS 제어 방식 통합 비교  ─  Rule-Based / LSTM / GRU")
+    print("=" * 76)
+
+    dfs = load_aligned()
+    results = {name: compute_metrics(df) for name, df in dfs.items()}
+
+    print_table(results)
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    save_csv(results, OUT_DIR)
+    plot_bars(results, OUT_DIR)
+    plot_prediction(results, OUT_DIR)
+    plot_radar(results, OUT_DIR)
+
+    print(f"\n[완료] 결과 폴더: {OUT_DIR}\n")
+
+
+if __name__ == '__main__':
+    main()
