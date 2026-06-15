@@ -1276,7 +1276,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
             <div class="comparison-section">
                 <div class="section-title">
-                    <span>Rule-Based vs LSTM 비교 (1년치 시뮬레이션)</span>
+                    <span>Rule-Based vs LSTM vs GRU 비교 (1년치 시뮬레이션)</span>
                     <button class="detail-btn" onclick="openComparisonModal()">상세 보기 ↗</button>
                 </div>
                 
@@ -1381,12 +1381,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Rule-Based vs LSTM 비교 모달 -->
+    <!-- Rule-Based vs LSTM vs GRU 비교 모달 -->
     <div class="modal-overlay" id="comparison-modal" onclick="closeComparisonModalOnOverlay(event)">
         <div class="modal" id="comparison-modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <div>
-                    <div class="modal-title">Rule-Based vs LSTM 성능 비교</div>
+                    <div class="modal-title">Rule-Based vs LSTM vs GRU 성능 비교</div>
                     <div class="modal-subtitle">1년치 시뮬레이션 결과 상세 분석</div>
                 </div>
                 <button class="close-btn" onclick="closeComparisonModal()">X</button>
@@ -2901,11 +2901,11 @@ MOBILE_HTML = """<!DOCTYPE html>
                 </div>
             </div>
             
-            <!-- 페이지 4: Rule-Based vs LSTM 1년치 비교 -->
+            <!-- 페이지 4: Rule-Based vs LSTM vs GRU 1년치 비교 -->
             <div class="page" id="page-4">
                 <div class="full-chart-section" style="overflow-y: auto;">
                     <div class="section-title">
-                        <span>Rule-Based vs LSTM 비교 (1년치 시뮬레이션)</span>
+                        <span>Rule-Based vs LSTM vs GRU 비교 (1년치 시뮬레이션)</span>
                         <button class="detail-btn" onclick="openComparisonModal()">상세 보기 ↗</button>
                     </div>
                     
@@ -3020,12 +3020,12 @@ MOBILE_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Rule-Based vs LSTM 비교 모달 -->
+    <!-- Rule-Based vs LSTM vs GRU 비교 모달 -->
     <div class="modal-overlay" id="comparison-modal" onclick="closeComparisonModalOnOverlay(event)">
         <div class="modal" id="comparison-modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <div>
-                    <div class="modal-title">Rule-Based vs LSTM 성능 비교</div>
+                    <div class="modal-title">Rule-Based vs LSTM vs GRU 성능 비교</div>
                     <div class="modal-subtitle">1년치 시뮬레이션 결과 상세 분석</div>
                 </div>
                 <button class="close-btn" onclick="closeComparisonModal()">X</button>
