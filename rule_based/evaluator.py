@@ -305,6 +305,8 @@ def calc_stability(result_df: pd.DataFrame) -> dict:
         'transitions_per_day'     : round(tpd,    2),
         'soc_in_band_rate_pct'    : round(band_rate, 2),
         'control_success_rate_pct': round(band_rate, 2),   # 하위 호환 별칭
+        # [§7] 과충·방전 방지율 = SOC 한계 위반이 없던 스텝 비율 (visualizer 호환)
+        'prevention_rate_pct'     : round((n - soc_violation) / n * 100 if n else 0.0, 2),
         'soc_above_band_pct'      : round(above, 2),
         'soc_below_band_pct'      : round(below, 2),
         'soc_max_pct'             : round(float(soc.max()) * 100, 2),
