@@ -26,10 +26,12 @@ class RuleBasedBESSController:
                 solar_kw : float,
                 hour     : int,
                 time_step: float = config.TIME_STEP_HOURS,
-                month    : int = 6) -> dict:
+                month    : int = 6,
+                weekday  : int = None,
+                date=None) -> dict:
 
         net_load      = load_kw - solar_kw
-        tariff_period = config.get_tariff_period(hour, month)
+        tariff_period = config.get_tariff_period(hour, month, weekday, date)
 
         bess_power = 0.0
         action     = 'idle'

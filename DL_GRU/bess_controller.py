@@ -68,12 +68,14 @@ class GRUBESSController:
                 actual_solar_kw: float,
                 hour: int,
                 time_step: float = config.TIME_STEP_HOURS,
-                month: int = 6) -> dict:
+                month: int = 6,
+                weekday: int = None,
+                date=None) -> dict:
         """1 타임스텝 제어 결정 + 상태 업데이트"""
         if self.peak_threshold is None:
             raise RuntimeError("set_peak_threshold()를 먼저 호출하세요.")
 
-        tariff = config.get_tariff_period(hour, month)
+        tariff = config.get_tariff_period(hour, month, weekday, date)
         pred_nl = predicted_net_load
         soc_target = self.SOC_TARGETS[tariff]
         power_ratio = self.POWER_RATIOS[tariff]

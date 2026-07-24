@@ -154,10 +154,10 @@ def build_shared_baseline(df: pd.DataFrame) -> pd.DataFrame:
     b['grid_power_kw'] = b['load_kw'] - b['solar_kw']
     ts = pd.to_datetime(b['timestamp'])
     if 'tariff_period' not in b.columns:
-        b['tariff_period'] = [config.get_tariff_period(int(h), int(m))
-                              for h, m in zip(ts.dt.hour, ts.dt.month)]
-    b['tariff_rate'] = [config.get_tariff_rate(int(h), int(m))
-                        for h, m in zip(ts.dt.hour, ts.dt.month)]
+        b['tariff_period'] = [config.get_tariff_period(int(h), int(m), int(wd), d)
+                              for h, m, wd, d in zip(ts.dt.hour, ts.dt.month, ts.dt.weekday, ts.dt.date)]
+    b['tariff_rate'] = [config.get_tariff_rate(int(h), int(m), int(wd), d)
+                        for h, m, wd, d in zip(ts.dt.hour, ts.dt.month, ts.dt.weekday, ts.dt.date)]
     return b
 
 

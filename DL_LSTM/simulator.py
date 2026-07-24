@@ -31,6 +31,8 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
             hour               = int(row['hour']),
             time_step          = config.TIME_STEP_HOURS,
             month              = int(pd.Timestamp(row['timestamp']).month),
+            weekday            = int(pd.Timestamp(row['timestamp']).weekday()),
+            date               = pd.Timestamp(row['timestamp']).date(),
         )
 
         records.append({
@@ -50,9 +52,9 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
     df = pd.DataFrame(records)
     df['charge_kw']    = df['bess_power_kw'].apply(lambda x: -x if x < 0 else 0.0)
     df['discharge_kw'] = df['bess_power_kw'].apply(lambda x:  x if x > 0 else 0.0)
-    _month = pd.to_datetime(df['timestamp']).dt.month
-    df['tariff_rate']  = [config.get_tariff_rate(int(h), int(m))
-                          for h, m in zip(df['hour'], _month)]
+    _ts = pd.to_datetime(df['timestamp'])
+    df['tariff_rate']  = [config.get_tariff_rate(int(h), int(m), int(wd), d)
+                          for h, m, wd, d in zip(df['hour'], _ts.dt.month, _ts.dt.weekday, _ts.dt.date)]
     return df
 
 
@@ -64,7 +66,7 @@ def run_baseline_simulation(test_df: pd.DataFrame) -> pd.DataFrame:
     df['soc']           = 0.0
     df['action']        = 'none'
     df['grid_power_kw'] = df['load_kw'] - df['solar_kw']
-    _month = pd.to_datetime(df['timestamp']).dt.month
-    df['tariff_rate']   = [config.get_tariff_rate(int(h), int(m))
-                           for h, m in zip(df['hour'], _month)]
+    _ts = pd.to_datetime(df['timestamp'])
+    df['tariff_rate']   = [config.get_tariff_rate(int(h), int(m), int(wd), d)
+                           for h, m, wd, d in zip(df['hour'], _ts.dt.month, _ts.dt.weekday, _ts.dt.date)]
     return df

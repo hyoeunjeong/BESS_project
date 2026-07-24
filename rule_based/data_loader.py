@@ -72,8 +72,9 @@ def merge_real_data(load_df: pd.DataFrame, smp_df: pd.DataFrame,
     df = df.merge(solar_df,      on='timestamp', how='inner')
     df['hour']          = df['timestamp'].dt.hour
     df['date']          = df['timestamp'].dt.date
-    df['tariff_period'] = [config.get_tariff_period(int(h), int(m))
-                           for h, m in zip(df['hour'], df['timestamp'].dt.month)]
+    df['tariff_period'] = [config.get_tariff_period(int(h), int(m), int(wd), d)
+                           for h, m, wd, d in zip(df['hour'], df['timestamp'].dt.month,
+                                                  df['timestamp'].dt.weekday, df['timestamp'].dt.date)]
     return df.sort_values('timestamp').reset_index(drop=True)
 
 

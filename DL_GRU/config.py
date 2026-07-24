@@ -54,45 +54,62 @@ SITE_NAME         = '서울 강동구 도시기반시설본부 (모델 시뮬레
 
 
 # =====================================================================
-#  전력요금 체계 (TOU, Time-of-Use)
+#  전력요금 체계 (TOU)  ─  산업용(갑)Ⅱ 고압A 선택Ⅱ (계약전력 4~300kW)
 # ---------------------------------------------------------------------
-#  TARIFF_MODE
-#    'paper'    : 논문 본문 실험 조건 (기본값).
-#                 한국전력공사 산업용(을) 고압A 여름철 TOU 시간대 구분을
-#                 연중 단일 구조로 단순화하고, 단가를 60/110/180 원/kWh 로
-#                 고정한다.  → 논문 식 (5)
-#                 · 최대부하 : 10-12시, 13-17시
-#                 · 중간부하 : 09-10시, 12-13시, 17-23시
-#                 · 경부하   : 23-09시
+#  TARIFF_MODE (기본값 'seasonal')
+#    'seasonal' : 2025년 시행 요금표 시간대 + 계절별 단가. (기본/권장)
+#    '2026'     : 2026년 개편 시간대(여름·봄가을 최대부하 저녁 이동). 민감도 분석용.
+#    'paper'    : 가상 요금 시나리오(60/110/180). 실존하지 않으며 재현/비교 기준 아님.
 #
-#    'seasonal' : 계절(여름/봄가을/겨울)을 구분한 실제 요금 구조.
-#                 논문 3.2 아홉째 후속과제(계절별 요금 재검증)용이며,
-#                 본문 결과 재현에는 사용하지 않는다.
-#
-#  [중요] 이 값을 바꾸면 논문 표 2.7~2.12 의 모든 수치가 달라진다.
-#         본문 결과를 재현하려면 반드시 'paper' 로 둘 것.
+#  요일·공휴일 규정(한전): 일요일·공휴일은 전 시간 경부하, 토요일 최대부하는 중간부하로 계량.
 # =====================================================================
-TARIFF_MODE = 'paper'
+TARIFF_MODE = 'seasonal'
 
+# 계약전력(kW) — 기본요금 요금적용전력의 30% 하한 산정용. 무제어 피크 ~71kW → 100kW 가정.
+CONTRACT_POWER_KW = 100.0
 
-# ── (A) 논문 조건: 연중 단일 시간대 구분 + 단일 단가 ──────────────
+# ── 시간대 구분표 (hour → on/mid, 그 외 off) ─────────────────────
+# 2025년 시행: 여름/봄가을 최대 11·13~17, 중간 8~10·12·18~21 / 겨울 최대 9~11·16~18, 중간 8·12~15·19~21
+_BANDS_2025 = {
+    'summer_spring': {'on': {11, 13, 14, 15, 16, 17},
+                      'mid': {8, 9, 10, 12, 18, 19, 20, 21}},
+    'winter':        {'on': {9, 10, 11, 16, 17, 18},
+                      'mid': {8, 12, 13, 14, 15, 19, 20, 21}},
+}
+# 2026년 개편: 여름·봄가을 최대 15~20(저녁), 중간 8~14·21 / 겨울은 2025와 동일
+_BANDS_2026 = {
+    'summer_spring': {'on': {15, 16, 17, 18, 19, 20},
+                      'mid': {8, 9, 10, 11, 12, 13, 14, 21}},
+    'winter':        {'on': {9, 10, 11, 16, 17, 18},
+                      'mid': {8, 12, 13, 14, 15, 19, 20, 21}},
+}
+# 가상 요금(paper) — 실존하지 않는 시나리오
 PAPER_ON_PEAK_HOURS  = {10, 11, 13, 14, 15, 16}
 PAPER_MID_PEAK_HOURS = {9, 12, 17, 18, 19, 20, 21, 22}
 PAPER_TARIFF = {'off_peak': 60.0, 'mid_peak': 110.0, 'on_peak': 180.0}
 
-
-# ── (B) 후속과제용: 계절 구분 요금 (산업용(갑)Ⅱ 고압A 선택Ⅱ) ─────
+# 계절별 단가 (원/kWh) — seasonal·2026 공용
 SEASONAL_TARIFF = {
     'summer': {'off_peak': 90.8, 'mid_peak': 116.6, 'on_peak': 150.1},
     'spring': {'off_peak': 90.8, 'mid_peak':  95.6, 'on_peak': 114.8},
     'winter': {'off_peak': 98.2, 'mid_peak': 115.1, 'on_peak': 144.5},
 }
+BASE_CHARGE_WON_PER_KW = 7470   # 기본요금 (원/kW·월)
 
-# 기본요금 (원/kW·월) — 최대수요전력 기준으로 부과된다.
-# 논문 2.8.2.4 의 '최대수요전력 증가 → 기본요금 증가' 정량화에 사용.
-# ※ 인용하는 요금제(산업용 을/갑Ⅱ, 선택Ⅰ/Ⅱ)에 따라 값이 달라지므로
-#    논문에 수치를 싣기 전에 한국전력공사 요금표로 반드시 재확인할 것.
-BASE_CHARGE_WON_PER_KW = 7470
+# 2025년 관공서 공휴일 (임시공휴일 제외 — 요금 규정상 임시공휴일은 평일 취급)
+#   ※ 사용자 확정 목록. 2025-06-03 대선일은 임시공휴일이라 제외.
+HOLIDAYS_2025 = {
+    '2025-01-01',
+    '2025-01-28', '2025-01-29', '2025-01-30',
+    '2025-03-03',
+    '2025-05-05', '2025-05-06',
+    '2025-06-06',
+    '2025-08-15',
+    '2025-10-03',
+    '2025-10-05', '2025-10-06', '2025-10-07', '2025-10-08',
+    '2025-10-09',
+    '2025-12-25',
+}
 
 
 def get_season(month: int) -> str:
@@ -101,28 +118,43 @@ def get_season(month: int) -> str:
     return 'spring'
 
 
-def get_tariff_period(hour: int, month: int = 6) -> str:
-    """(시간, 월) → 요금 시간대 구분.  TARIFF_MODE 에 따라 분기한다."""
+def _raw_period(hour: int, season: str) -> str:
+    """요일·공휴일 보정 전 기본 시간대(모드별 시간대표)."""
     if TARIFF_MODE == 'paper':
-        # 연중 단일 구조 → month 는 사용하지 않는다 (시그니처 호환용)
         if hour in PAPER_ON_PEAK_HOURS:  return 'on_peak'
         if hour in PAPER_MID_PEAK_HOURS: return 'mid_peak'
         return 'off_peak'
-
-    # 'seasonal'
-    if get_season(month) == 'winter':
-        if 9 <= hour < 12 or 16 <= hour < 19:                   return 'on_peak'
-        if 8 <= hour < 9 or 12 <= hour < 16 or 19 <= hour < 22: return 'mid_peak'
-        return 'off_peak'
-    else:
-        if 15 <= hour < 21:                    return 'on_peak'
-        if 8 <= hour < 15 or 21 <= hour < 22:  return 'mid_peak'
-        return 'off_peak'
+    bands = _BANDS_2026 if TARIFF_MODE == '2026' else _BANDS_2025
+    key = 'winter' if season == 'winter' else 'summer_spring'
+    if hour in bands[key]['on']:  return 'on_peak'
+    if hour in bands[key]['mid']: return 'mid_peak'
+    return 'off_peak'
 
 
-def get_tariff_rate(hour: int, month: int = 6) -> float:
-    """(시간, 월) → 전력량요금 단가 (원/kWh)"""
-    period = get_tariff_period(hour, month)
+def get_tariff_period(hour: int, month: int = 6,
+                      weekday: int = None, date=None) -> str:
+    """(시간, 월, 요일, 날짜) → 요금 시간대 구분.
+
+    weekday: 0=월 … 5=토, 6=일.  date: 'YYYY-MM-DD' 또는 datetime.date.
+    한전 규정: 일요일·공휴일 전 시간 경부하, 토요일 최대부하→중간부하.
+    """
+    season = get_season(month)
+    period = _raw_period(hour, season)
+    if TARIFF_MODE == 'paper':
+        return period   # 가상 시나리오 — 요일/공휴일 규칙 미적용
+
+    d = str(date)[:10] if date is not None else None
+    if (d is not None and d in HOLIDAYS_2025) or weekday == 6:
+        return 'off_peak'          # 공휴일·일요일 → 전 시간 경부하
+    if weekday == 5 and period == 'on_peak':
+        return 'mid_peak'          # 토요일 최대부하 → 중간부하
+    return period
+
+
+def get_tariff_rate(hour: int, month: int = 6,
+                    weekday: int = None, date=None) -> float:
+    """(시간, 월, 요일, 날짜) → 전력량요금 단가 (원/kWh)"""
+    period = get_tariff_period(hour, month, weekday, date)
     if TARIFF_MODE == 'paper':
         return PAPER_TARIFF[period]
     return SEASONAL_TARIFF[get_season(month)][period]

@@ -200,8 +200,8 @@ def add_features(merged: pd.DataFrame) -> pd.DataFrame:
     dt = pd.to_datetime(df['timestamp'])
 
     df['net_load_kw'] = (df['load_kw'] - df['solar_kw']).clip(lower=0)
-    df['tariff_rate'] = [config.get_tariff_rate(int(h), int(m))
-                         for h, m in zip(dt.dt.hour, dt.dt.month)]
+    df['tariff_rate'] = [config.get_tariff_rate(int(h), int(m), int(wd), d)
+                         for h, m, wd, d in zip(dt.dt.hour, dt.dt.month, dt.dt.weekday, dt.dt.date)]
 
     # 순환 인코딩
     df['hour_sin']  = np.sin(2 * np.pi * dt.dt.hour      / 24)
@@ -401,8 +401,9 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
     df = df.merge(solar_df,      on='timestamp', how='inner')
     df['hour']          = df['timestamp'].dt.hour
     df['date']          = df['timestamp'].dt.date
-    df['tariff_period'] = [config.get_tariff_period(int(h), int(m))
-                           for h, m in zip(df['hour'], df['timestamp'].dt.month)]
+    df['tariff_period'] = [config.get_tariff_period(int(h), int(m), int(wd), d)
+                           for h, m, wd, d in zip(df['hour'], df['timestamp'].dt.month,
+                                                  df['timestamp'].dt.weekday, df['timestamp'].dt.date)]
     df = df.sort_values('timestamp').reset_index(drop=True)
 
     # ── 데이터 출처·범위·결측 보고 (재현성)
