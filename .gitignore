@@ -20,12 +20,10 @@ _archive/
 
 _backup_paper_migration/
 
-# ── 논문 산출물은 GitHub 에 포함 (스냅샷 공유용, 재생성도 가능) ──
+# ── 논문 산출물은 GitHub 에 포함 (근거 자료, 재생성도 가능) ──
 !figures/
 !figures/*.png
 !/results/
 /results/*
-!/results/table_2_11_stages.csv
-!/results/table_2_12_reasons.csv
-!/results/table_2_15_kappa.csv
-!/results/prediction_contribution.csv
+!/results/*.csv          # 표·seed_sweep·base_data 등 논문 근거 CSV 전부
+# (대용량 중간 바이너리 *.npy 는 계속 제외)
