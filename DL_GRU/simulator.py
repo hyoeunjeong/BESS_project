@@ -13,17 +13,17 @@ def run_gru_simulation(merged_df      : pd.DataFrame,
     if controller is None:
         controller = GRUBESSController()
 
-    # 피크 임계값: 테스트 기간 실제 부하 기준
     test_df = merged_df.iloc[test_start_idx: test_start_idx + len(predicted_nl)]
-    # 정정(마): 데이터 누수 차단 — 피크 임계값은 학습 구간(앞 70%) 부하로만 산출
-    n_train = int(len(test_df) * config.TRAIN_RATIO)
-    controller.set_peak_threshold(test_df['load_kw'].values[:n_train])
+    # [정정(마)/§5-3] 데이터 누수 차단 — 피크 임계값·수요상한을 학습 구간(전체 데이터 앞 70%)
+    #   에서만 산출한다. FULL_YEAR 값과 무관하게 동일한 값이 나오도록 merged_df 기준.
+    n_tr_full = int(len(merged_df) * config.TRAIN_RATIO)
+    train_slice = merged_df.iloc[:n_tr_full]
+    controller.set_peak_threshold(train_slice['load_kw'].values)
 
     # [§4] 수요전력 상한(P_CAP) = 학습 구간 무제어 요금적용전력(중간·최대부하 순부하 최대)
     if hasattr(controller, 'set_demand_cap'):
-        _tr = test_df.iloc[:n_train]
-        _pmask = _tr['tariff_period'].isin(['mid_peak', 'on_peak'])
-        _pnet = (_tr['load_kw'] - _tr['solar_kw']).clip(lower=0)
+        _pmask = train_slice['tariff_period'].isin(['mid_peak', 'on_peak'])
+        _pnet = (train_slice['load_kw'] - train_slice['solar_kw']).clip(lower=0)
         controller.set_demand_cap(float(_pnet[_pmask].max()) if bool(_pmask.any()) else None)
 
     records = []

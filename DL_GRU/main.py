@@ -72,7 +72,14 @@ def main():
         scaler = load_scaler()
         X, y, scaler = make_sequences(df, scaler=scaler, fit_scaler=False)
     else:
-        X, y, scaler = make_sequences(df, fit_scaler=True)
+        # [§5-1] 데이터 누수 차단: 스케일러를 학습 구간(앞 70% 행)에서만 fit.
+        #   기존 fit_scaler=True 는 val/test 를 포함한 전체로 fit → 미래 정보 누수.
+        from sklearn.preprocessing import MinMaxScaler
+        i_tr = int(len(df) * config.TRAIN_RATIO)
+        scaler = MinMaxScaler().fit(df[FEATURE_COLS].values[:i_tr].astype(np.float32))
+        print(f"   [§5-1] 스케일러 fit 범위: 학습 구간 앞 {i_tr:,}행 "
+              f"({config.TRAIN_RATIO:.0%}) — val/test 미포함")
+        X, y, scaler = make_sequences(df, scaler=scaler, fit_scaler=False)
         save_scaler(scaler)
 
     (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_sequences(X, y)
@@ -107,6 +114,26 @@ def main():
     y_pred_kw = inverse_target(y_pred_scaled, scaler)
     print(f"   예측 완료: {len(y_pred_kw):,}개 샘플")
 
+    # [§5-2/§3-3] 예측 지표를 train/val/test/full 구간으로 분리 산출 (FULL_YEAR 전용).
+    #   논문 표에는 test 를 싣고, full 은 부록/참고용으로 보존한다.
+    pred_split = None
+    if FULL_YEAR:
+        from evaluator import calc_prediction_metrics
+        _n  = len(y_true_kw)
+        _t1 = int(_n * config.TRAIN_RATIO)
+        _t2 = int(_n * (config.TRAIN_RATIO + config.VAL_RATIO))
+        pred_split = {
+            'train': calc_prediction_metrics(y_true_kw[:_t1],    y_pred_kw[:_t1]),
+            'val'  : calc_prediction_metrics(y_true_kw[_t1:_t2], y_pred_kw[_t1:_t2]),
+            'test' : calc_prediction_metrics(y_true_kw[_t2:],    y_pred_kw[_t2:]),
+            'full' : calc_prediction_metrics(y_true_kw,          y_pred_kw),
+        }
+        _t = pred_split['test']
+        print(f"   [예측 성능·논문표=test] MAE {_t['mae_kw']:.3f} kW  RMSE {_t['rmse_kw']:.3f} kW  "
+              f"상대오차 {_t['nmae_pct']:.2f}%  (n={_t['n_samples']:,})")
+        print(f"   (참고) train MAE {pred_split['train']['mae_kw']:.3f} / "
+              f"val {pred_split['val']['mae_kw']:.3f} / full {pred_split['full']['mae_kw']:.3f} kW")
+
     # 시뮬레이션 시작 인덱스 계산
     # 시퀀스 생성 시 seq_len 만큼 앞이 잘림
     if FULL_YEAR:
@@ -134,7 +161,12 @@ def main():
     print("\n[7/8] 평가 지표 계산")
     metrics = evaluate_all(gru_result, baseline,
                            y_true=y_true_kw, y_pred=y_pred_kw)
-    
+
+    # [§3-3] 논문 표 예측 지표는 test 구간 값으로 교체, 4구간 전체는 참고용 보존
+    if pred_split is not None:
+        metrics['prediction'] = pred_split['test']
+        metrics['prediction_splits'] = pred_split
+
     if FULL_YEAR:
         print_report(metrics, title="GRU BESS 1년치 평가 리포트")
     else:
