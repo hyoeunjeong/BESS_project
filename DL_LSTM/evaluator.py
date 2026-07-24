@@ -104,11 +104,16 @@ def calc_economic(result_df: pd.DataFrame,
 
     peak_saving_rate = breakdown['on_peak']['rate_pct']
 
-    # ── [추가] 최대수요전력 (논문 식 35) ─────────────────────────
-    #   기본요금은 요금 시간대와 무관하게 순시 최대전력으로 산정되므로
-    #   전력량요금 절감률과 별도로 평가해야 한다.
-    peak_r = float(result_df['grid_power_kw'].max())
-    peak_b = float(baseline_df['grid_power_kw'].max())
+    # ── [§3-1 정정] 요금적용전력 = 중간·최대부하 시간대의 최대수요전력만 대상 ──
+    #   한전 규정상 경부하 시간대 피크는 기본요금에 잡히지 않는다.
+    #   요금적용전력 하한 = 계약전력 × 30%.
+    #   ※ 기본공급약관 제68조는 직전 12개월 롤링 최대 규정도 있으나, 여기서는
+    #     당해연도 최대치 × 단가 × 개월수의 근사값을 쓴다.
+    _floor  = getattr(config, 'CONTRACT_POWER_KW', 0.0) * 0.30
+    _mask_r = result_df['tariff_period'].isin(['mid_peak', 'on_peak'])
+    _mask_b = baseline_df['tariff_period'].isin(['mid_peak', 'on_peak'])
+    peak_r = max(float(result_df.loc[_mask_r, 'grid_power_kw'].clip(lower=0).max()), _floor)
+    peak_b = max(float(baseline_df.loc[_mask_b, 'grid_power_kw'].clip(lower=0).max()), _floor)
     peak_demand_reduction = (peak_b - peak_r) / peak_b * 100 if peak_b > 0 else 0.0
 
     # ── [추가] 기본요금 영향 정량화 (2.8.2.4) ────────────────────
@@ -162,12 +167,15 @@ def _month_count(df: pd.DataFrame) -> int:
 
 
 def _monthly_peak_sum(df: pd.DataFrame) -> float:
-    """월별 최대수요전력의 합 (월별 기본요금 산정 방식)"""
+    """월별 요금적용전력(중간·최대부하 시간대 최대수요)의 합 (월별 기본요금 산정 방식)"""
     if 'timestamp' not in df.columns:
-        return float(df['grid_power_kw'].max()) * 12
-    t = pd.to_datetime(df['timestamp'])
-    return float(df.assign(_m=t.dt.to_period('M'))
-                   .groupby('_m')['grid_power_kw'].max().sum())
+        return float(df['grid_power_kw'].clip(lower=0).max()) * 12
+    d = df
+    if 'tariff_period' in df.columns:
+        d = df[df['tariff_period'].isin(['mid_peak', 'on_peak'])]
+    g = d.assign(_m=pd.to_datetime(d['timestamp']).dt.to_period('M'),
+                 _p=d['grid_power_kw'].clip(lower=0))
+    return float(g.groupby('_m')['_p'].max().sum())
 
 
 # =====================================================================
@@ -201,7 +209,12 @@ def calc_energy(result_df: pd.DataFrame) -> dict:
     utilization = (charge_kwh + discharge_kwh) \
                   / (config.BESS_MAX_POWER_KW * sim_hours) * 100 \
                   if sim_hours > 0 else 0.0
-    roundtrip = discharge_kwh / charge_kwh * 100 if charge_kwh > 0 else 0.0
+    # [§3-2 정정] 평가 구간 기말 잔여에너지 보정 → 라운드트립 100% 초과 방지.
+    #   초기 저장분(E_start)을 방전에 쓰면 분모에 (E_start − E_end)를 더한다.
+    _e_start = config.SOC_INITIAL * config.BESS_CAPACITY_KWH
+    _e_end   = float(result_df['soc'].iloc[-1]) * config.BESS_CAPACITY_KWH
+    _rt_denom = charge_kwh + max(0.0, _e_start - _e_end)
+    roundtrip = discharge_kwh / _rt_denom * 100 if _rt_denom > 0 else 0.0
 
     # ── [정정] 태양광 이용률 / 커튼일먼트 ────────────────────────
     #   기존:  solar_to_bess = min(총잉여, 총충전량)
