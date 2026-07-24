@@ -237,6 +237,8 @@ is_weekend                                                  # 주말/공휴일 �
 ```
 Bess_Project/
 ├── compare.py                  # 세 방식 동일 구간 비교(교집합 정렬 + 공유 baseline)
+├── make_tables.py              # 논문 표 2.11/2.12/2.15 일괄 생성
+├── make_figures.py             # 논문 그림 2.3~2.12 일괄 생성 (300dpi)
 ├── README.md
 │
 ├── rule_based/                 # 규칙 기반 제어
@@ -254,6 +256,8 @@ Bess_Project/
 │   ├── main.py                 #   SKIP_TRAINING / FULL_YEAR 옵션
 │   ├── bess_controller.py      #   P0~P3 + 수요전력 관리 계층
 │   ├── models/lstm_model.py    #   LSTM 예측 모델 + set_seed
+│   ├── _build_base_data.py     #   공통 입력(base_data.csv, pred_lstm.npy) 생성
+│   ├── stage_run.py            #   표 2.11/2.15 정정 단계별·κ 민감도 시뮬
 │   ├── _ablation_run.py        #   예측 기여도 ablation 러너
 │   └── seed_sweep.py           #   다중 시드 반복 학습(강건성)
 │
@@ -303,7 +307,28 @@ cd DL_GRU  && python _ablation_dump.py     # GRU 예측 덤프
 cd ../DL_LSTM && python _ablation_run.py   # → results/prediction_contribution.csv
 ```
 
-### 9.4 웹 대시보드
+### 9.4 논문 표·그림 재생성
+
+세 방식 시뮬레이션(§9.2)과 공통 입력을 만든 뒤, 두 줄로 논문의 표·그림이 재생성된다.
+
+```bash
+# 공통 입력 (base_data.csv, pred_lstm.npy, pred_gru.npy)
+cd DL_LSTM && python _build_base_data.py && cd ..
+cd DL_GRU  && python _ablation_dump.py  && cd ..
+
+# 표·그림 일괄 생성
+python make_tables.py      # → results/table_2_11_stages.csv, table_2_12_reasons.csv, table_2_15_kappa.csv
+python make_figures.py     # → figures/fig_2_03.png ~ fig_2_12.png (300dpi)
+```
+
+- **표 2.11** 정정 단계별(A~F) 성능 — `stage_run.py`(플래그 방식 단일 제어기, A단계는 git 초기 버전 앵커).
+- **표 2.12** 제어 계층별 발동 횟수 — 예측값 참조 발동 비율(peak_cut) 포함.
+- **표 2.15** 수요저감 계수 κ(0.85/0.90/0.95) 민감도. κ=0.90 사전 설계값 고정.
+- **그림 2.5** 정정 단계별 순절감액·요금적용전력(이중 y축, (바)에서 부호 반전 시각화). 2.1·2.2는 개념도로 별도 유지.
+
+> `results/` · `figures/` 산출물은 `.gitignore` 대상이며 위 스크립트로 언제든 재생성된다.
+
+### 9.5 웹 대시보드
 
 ```bash
 cd web_dashboard && python web_app.py      # http://localhost:5000
