@@ -15,6 +15,8 @@
 =====================================================================
 """
 import os
+import sys
+import subprocess
 import pandas as pd
 
 REPO    = os.path.dirname(os.path.abspath(__file__))
@@ -93,10 +95,25 @@ def build_table_2_12(results: dict) -> pd.DataFrame:
     return out
 
 
+def _run_stage_tables():
+    """표 2.11/2.15 는 DL_LSTM/stage_run.py 가 생성한다(config 의존 → 서브프로세스)."""
+    script = os.path.join(REPO, 'DL_LSTM', 'stage_run.py')
+    print("[표 2.11/2.15] stage_run.py 실행 중…")
+    r = subprocess.run([sys.executable, script], cwd=os.path.join(REPO, 'DL_LSTM'),
+                       capture_output=True, text=True, encoding='utf-8')
+    if r.returncode != 0:
+        print("  [경고] stage_run.py 실패:\n" + (r.stderr or '')[-800:])
+    else:
+        print("  표 2.11/2.15 생성 완료")
+
+
 def main():
     os.makedirs(RESULTS, exist_ok=True)
+    _run_stage_tables()                 # 표 2.11, 2.15
     results = _load_results()
-    build_table_2_12(results)
+    build_table_2_12(results)           # 표 2.12
+    print("\n[make_tables] 완료 — results/table_2_11_stages.csv, "
+          "table_2_12_reasons.csv, table_2_15_kappa.csv")
 
 
 if __name__ == '__main__':
