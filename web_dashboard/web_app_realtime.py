@@ -15,7 +15,8 @@ COMPARISON_DB = PROJECT_ROOT / 'realtime_data' / 'comparison.db'
 BESS_CAPACITY = 100.0
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'bess-realtime-secret-2025'
+# [§8] 하드코딩 제거 — 환경변수 우선, 로컬 개발용 임시값 fallback
+app.config['SECRET_KEY'] = os.environ.get('BESS_SECRET_KEY', 'dev-only-change-me')
 
 @app.after_request
 def add_cors_headers(response):

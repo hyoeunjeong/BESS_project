@@ -44,7 +44,8 @@ print(f"  DB 파일: {DB_PATH}\n")
 
 # Flask 설정
 app = Flask(__name__, template_folder=str(PROJECT_ROOT / 'templates'))
-app.config['SECRET_KEY'] = 'bess-monitoring-secret-2025'
+# [§8] 하드코딩 제거 — 환경변수 우선, 로컬 개발용 임시값 fallback
+app.config['SECRET_KEY'] = os.environ.get('BESS_SECRET_KEY', 'dev-only-change-me')
 
 # CORS 헤더 추가
 @app.after_request
