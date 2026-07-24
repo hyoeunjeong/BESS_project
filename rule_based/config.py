@@ -94,6 +94,9 @@ TARGET_AVG_LOAD_KW = 50.0
 # 데이터 소스 우선순위: 'api' (API 우선) | 'csv' (CSV 우선) | 'auto' (API → CSV → 가상)
 DATA_SOURCE = 'auto'
 
+# 실측 데이터 강제(재현성). True 면 태양광 시뮬레이션 등 합성 폴백을 예외로 차단한다.
+STRICT_DATA = True
+
 # 공통 인증키 (공공데이터포털 + ODcloud)
 # ※ .env 파일에서 로드 (보안상 코드에 직접 입력하지 마세요)
 COMMON_API_KEY = os.getenv('COMMON_API_KEY', '')

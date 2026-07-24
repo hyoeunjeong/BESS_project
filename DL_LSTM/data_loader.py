@@ -297,12 +297,45 @@ def load_scaler(path: str = config.SCALER_SAVE_PATH) -> MinMaxScaler:
 
 
 # 통합 로드 함수
+def _validate_series(s: pd.Series, name: str, min_unique_ratio: float = 0.05):
+    """수집 데이터가 상수/반복(하루치×N) 패턴인지 검사한다(§1-1 가짜 SMP 차단).
+
+    - 고유값 비율이 너무 낮으면 수집 실패로 간주.
+    - 24시간 배수 길이면, 모든 날짜의 24시간 프로파일이 동일한지(반복) 검사.
+    """
+    s = pd.to_numeric(s, errors='coerce').dropna()
+    u = s.nunique()
+    if u < len(s) * min_unique_ratio:
+        raise ValueError(
+            f"{name}: 고유값 {u}개 / {len(s)}행 — 반복 패턴 의심. 수집 실패로 간주한다.")
+    if len(s) % 24 == 0 and len(s) >= 48:
+        daily = s.values.reshape(-1, 24)
+        if np.abs(daily - daily[0]).max() < 1e-9:
+            raise ValueError(
+                f"{name}: 모든 날짜의 24시간 프로파일이 동일. 수집 실패(하루치×N 반복).")
+
+
+def _report_data_source(df: pd.DataFrame, src: dict):
+    """사용된 데이터 출처·범위·결측 시점을 명시적으로 출력한다(재현성)."""
+    print(f"[데이터 출처] 부하={src.get('load')} / SMP={src.get('smp')} / 태양광={src.get('solar')}")
+    ts = pd.to_datetime(df['timestamp'])
+    full = pd.date_range(ts.min(), ts.max(), freq='h')
+    missing = len(full) - len(df)
+    print(f"[데이터 범위] {ts.min()} ~ {ts.max()}, {len(df):,}시점 (결측 {missing}시점)")
+    if missing > 0:
+        from collections import Counter
+        miss = sorted(set(full) - set(ts))
+        by_hour = Counter(t.hour for t in miss)
+        print(f"   결측 시각대 분포(시각:개수): {dict(sorted(by_hour.items()))}")
+
+
 def load_data(load_path: str = config.LOAD_DATA_PATH,
               smp_path : str = config.SMP_DATA_PATH,
               fallback_days: int = config.SIMULATION_DAYS,
               source   : str = None) -> pd.DataFrame:
     """
-    데이터 로드 (우선순위: API → CSV → 가상 데이터)
+    데이터 로드 (우선순위: API/캐시 → CSV → 가상 데이터)
+    STRICT_DATA=True 면 실측(API캐시/기상청 실측 태양광)만 허용하고 폴백은 예외.
 
     Parameters
     ----------
@@ -314,19 +347,28 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
     DataFrame : add_features() 적용 완료
     """
     source = source or config.DATA_SOURCE
+    strict = getattr(config, 'STRICT_DATA', False)
     load_df, smp_df, solar_df = None, None, None
+    src = {'load': None, 'smp': None, 'solar': None}
 
-    # ── 1순위: API 
+    # ── 1순위: API / 캐시
     if source in ('api', 'auto') and _API_AVAILABLE:
         try:
-            print("[데이터] 공공 API 호출 시도")
-            load_df, smp_df, solar_df = _load_from_api()
+            print("[데이터] 공공 API/캐시 호출 시도")
+            load_df, smp_df, solar_df, src = _load_from_api(strict=strict)
         except Exception as ex:
+            if strict:
+                raise RuntimeError(
+                    f"[STRICT_DATA] 실측 데이터 로드 실패로 중단합니다: {ex}") from ex
             print(f"[데이터] API 실패 → CSV로 폴백: {ex}")
             load_df = smp_df = solar_df = None
 
-    # ── 2순위: CSV 
+    # ── 2순위: CSV (STRICT 면 금지 — 태양광이 합성이라 논문과 달라짐)
     if load_df is None and source in ('csv', 'auto'):
+        if strict:
+            raise RuntimeError(
+                "[STRICT_DATA] CSV 폴백은 태양광이 합성(simulate_solar)이라 금지됩니다. "
+                "기상청 실측 캐시(API캐시) 경로를 사용하세요.")
         if os.path.exists(load_path) and os.path.exists(smp_path):
             print("[데이터] 실제 KPX CSV 로드")
             load_raw = load_kpx_demand_data(load_path)
@@ -336,15 +378,25 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
                         - load_df['timestamp'].min()).days + 1
             start    = str(load_df['timestamp'].min().date())
             solar_df = simulate_solar(days=days, start_date=start)
+            src = {'load': 'KPX CSV', 'smp': 'KPX CSV', 'solar': '합성(simulate_solar)'}
 
-    # ── 3순위: 가상 데이터 
+    # ── 3순위: 가상 데이터 (STRICT 면 금지)
     if load_df is None:
+        if strict:
+            raise RuntimeError(
+                "[STRICT_DATA] 실측 데이터가 없어 중단합니다. 가상 데이터 대체는 금지됩니다.")
         print(f"[데이터] 모든 소스 실패 → 가상 데이터 {fallback_days}일 생성")
         load_df  = generate_sample_load_data(fallback_days)
         smp_df   = generate_sample_smp_data(fallback_days)
         solar_df = simulate_solar(fallback_days)
+        src = {'load': '가상', 'smp': '가상', 'solar': '합성'}
 
-    # ── 병합 
+    # ── 수집 데이터 진위 검증 (§1-1: 반복/상수 패턴 차단)
+    _validate_series(smp_df['smp'],        'SMP')
+    _validate_series(load_df['load_kw'],   '부하')
+    _validate_series(solar_df['solar_kw'], '태양광', min_unique_ratio=0.02)
+
+    # ── 병합
     df = load_df.merge(smp_df,   on='timestamp', how='inner')
     df = df.merge(solar_df,      on='timestamp', how='inner')
     df['hour']          = df['timestamp'].dt.hour
@@ -353,19 +405,24 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
                            for h, m in zip(df['hour'], df['timestamp'].dt.month)]
     df = df.sort_values('timestamp').reset_index(drop=True)
 
-    # ── 피처 추가 
+    # ── 데이터 출처·범위·결측 보고 (재현성)
+    _report_data_source(df, src)
+
+    # ── 피처 추가
     df = add_features(df)
     print(f"[데이터] 총 {len(df):,}h ({len(df)//24}일) 로드 완료")
     return df
 
 
-def _load_from_api() -> tuple:
+def _load_from_api(strict: bool = False) -> tuple:
     """
-    API에서 부하/SMP/태양광 데이터 수집
+    API/캐시에서 부하/SMP/태양광 데이터 수집
+
+    STRICT_DATA=True 면 SMP·태양광 합성 폴백을 예외로 차단한다.
 
     Returns
     -------
-    (load_df, smp_df, solar_df)
+    (load_df, smp_df, solar_df, src)  # src = {'load','smp','solar'} 출처 딕셔너리
     """
     start = config.API_START_DATE
     end   = config.API_END_DATE
@@ -374,10 +431,12 @@ def _load_from_api() -> tuple:
     load_raw = api_client.fetch_load_data(start, end)
     load_df  = scale_load_data(load_raw)
 
-    # SMP 데이터 (실패 시 가상 데이터 폴백)
+    # SMP 데이터 (STRICT 면 실패 시 예외, 아니면 가상 폴백)
     try:
         smp_df = api_client.fetch_smp_data(start, end)
     except Exception as ex:
+        if strict:
+            raise RuntimeError(f"[STRICT_DATA] SMP 실측 로드 실패: {ex}") from ex
         print(f"   [경고] SMP API 실패 → 가상 SMP 데이터로 대체: {ex}")
         days = (pd.Timestamp(end) - pd.Timestamp(start)).days + 1
         smp_df = generate_sample_smp_data(days)
@@ -385,10 +444,13 @@ def _load_from_api() -> tuple:
         smp_df['timestamp'] = pd.date_range(
             start=start, periods=len(smp_df), freq='h')
 
-    # 태양광 데이터 (Rule-Based 와 동일한 실측 태양광으로 통일)
+    # 태양광 데이터 (기상청 실측 캐시로만; STRICT 면 실패 시 예외)
     try:
         solar_df = _load_solar_from_rb_cache(start, end)
     except Exception as ex:
+        if strict:
+            raise RuntimeError(
+                f"[STRICT_DATA] 기상청 실측 태양광(_load_solar_from_rb_cache) 로드 실패: {ex}") from ex
         print(f"   [경고] rule_based 실측 태양광 로드 실패 → 시뮬레이션 사용: {ex}")
         days = (pd.Timestamp(end) - pd.Timestamp(start)).days + 1
         solar_df = simulate_solar(days=days, start_date=start)
@@ -406,7 +468,8 @@ def _load_from_api() -> tuple:
     solar_df = solar_df[(solar_df['timestamp']>= common_start) & (solar_df['timestamp'] <= common_end)]
 
     print(f"   [API 통합] 공통 기간: {common_start.date()} ~ {common_end.date()}")
-    return load_df, smp_df, solar_df
+    src = {'load': 'API캐시', 'smp': 'API캐시', 'solar': '기상청실측캐시(kma_st108)'}
+    return load_df, smp_df, solar_df, src
 
 
 def _solar_from_weather(weather_df: pd.DataFrame,

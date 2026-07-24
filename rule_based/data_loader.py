@@ -154,6 +154,10 @@ def load_all_data(use_load_api: bool = True,
         kma_df   = fetch_kma_data()
         solar_df = convert_irradiance_to_solar(kma_df)
     else:
+        if getattr(config, 'STRICT_DATA', False):
+            raise RuntimeError(
+                "[STRICT_DATA] rule_based 태양광 시뮬레이션 금지 — "
+                "기상청 실측(use_kma_api=True)만 허용합니다.")
         print("[데이터] 태양광 시뮬레이션 사용")
         from solar_model import simulate_solar_generation
         sim_days = (load_df['timestamp'].max() - load_df['timestamp'].min()).days + 1
@@ -167,5 +171,32 @@ def load_all_data(use_load_api: bool = True,
 
     # 4. 병합
     merged = merge_real_data(load_df, smp_df, solar_df)
+
+    # §1: 수집 데이터 진위 검증 + 출처/범위 로깅
+    _validate_series(merged['smp'],      'SMP')
+    _validate_series(merged['load_kw'],  '부하')
+    _validate_series(merged['solar_kw'], '태양광', min_unique_ratio=0.02)
+    _src = {'load': 'API캐시' if use_load_api else 'CSV',
+            'smp' : 'API캐시(육지)' if use_smp_api else 'CSV',
+            'solar': '기상청ASOS일사량' if use_kma_api else '시뮬레이션'}
+    print(f"[데이터 출처] 부하={_src['load']} / SMP={_src['smp']} / 태양광={_src['solar']}")
+    _ts = pd.to_datetime(merged['timestamp'])
+    _full = pd.date_range(_ts.min(), _ts.max(), freq='h')
+    print(f"[데이터 범위] {_ts.min()} ~ {_ts.max()}, "
+          f"{len(merged):,}시점 (결측 {len(_full) - len(merged)}시점)")
     print(f"[데이터] 병합 완료: 총 {len(merged):,}시간 ({len(merged)/24:.0f}일)")
     return merged
+
+
+def _validate_series(s: pd.Series, name: str, min_unique_ratio: float = 0.05):
+    """수집 데이터가 상수/반복(하루치×N) 패턴인지 검사한다(§1-1 가짜 SMP 차단)."""
+    s = pd.to_numeric(s, errors='coerce').dropna()
+    u = s.nunique()
+    if u < len(s) * min_unique_ratio:
+        raise ValueError(
+            f"{name}: 고유값 {u}개 / {len(s)}행 — 반복 패턴 의심. 수집 실패로 간주한다.")
+    if len(s) % 24 == 0 and len(s) >= 48:
+        daily = s.values.reshape(-1, 24)
+        if np.abs(daily - daily[0]).max() < 1e-9:
+            raise ValueError(
+                f"{name}: 모든 날짜의 24시간 프로파일이 동일. 수집 실패(하루치×N 반복).")

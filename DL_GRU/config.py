@@ -167,6 +167,10 @@ TARGET_AVG_LOAD_KW = 50.0
 # 공공 API 설정
 DATA_SOURCE = 'auto'
 
+# 실측 데이터 강제(재현성). True 면 가상 데이터·합성 태양광 폴백을 예외로 차단하고,
+# 태양광은 반드시 기상청 실측 캐시(_load_solar_from_rb_cache)로만 로드한다.
+STRICT_DATA = True
+
 COMMON_API_KEY = os.getenv('COMMON_API_KEY', '')
 
 # 기상청 단기예보 API 키 (.env에 별도 키 있으면 사용, 없으면 공통키 재사용)
