@@ -13,6 +13,7 @@ import os
 import numpy as np
 import pandas as pd
 
+import config
 from bess_controller import LSTMBESSController
 from evaluator import evaluate_all
 
@@ -117,13 +118,15 @@ def main():
     sim = base.iloc[SEQ:].reset_index(drop=True)
     assert len(sim) == len(pred), f"{len(sim)} != {len(pred)}"
 
-    ntr = int(len(sim) * 0.70)
-    load = sim['load_kw'].values
-    thr_full  = float(np.percentile(load, 85))
-    thr_train = float(np.percentile(load[:ntr], 85))
-    nl = (sim.load_kw - sim.solar_kw).clip(lower=0)
-    mo = sim.tp.isin(['mid_peak', 'on_peak'])
-    P_CAP = float(nl[:ntr][mo[:ntr]].max())
+    # [4단계] simulator 와 동일: 임계값·P_CAP 을 merged(=base 전체 8,760) 첫 70% 에서 산출
+    #   (simulator.set_peak_threshold(merged_df[:n_tr_full]) 와 동일 → 60.41 kW)
+    n_tr_full = int(len(base) * config.TRAIN_RATIO)
+    tr = base.iloc[:n_tr_full]
+    thr_full  = float(np.percentile(base['load_kw'].values, 85))   # A 단계: 전구간(정정 前)
+    thr_train = float(np.percentile(tr['load_kw'].values, 85))     # A′~F: 학습구간
+    _nl = (tr.load_kw - tr.solar_kw).clip(lower=0)
+    _mo = tr.tp.isin(['mid_peak', 'on_peak'])
+    P_CAP = float(_nl[_mo].max())
     TGT = P_CAP * 0.90
     baseline = _baseline(sim)
     print(f"피크 임계값  전구간 {thr_full:.2f} kW / 학습구간 {thr_train:.2f} kW")
