@@ -35,7 +35,8 @@ class LSTMBESSController:
                  soc_min: float = config.SOC_MIN,
                  soc_max: float = config.SOC_MAX,
                  soc_initial: float = config.SOC_INITIAL,
-                 peak_percentile: float = 85.0):
+                 peak_percentile: float = 85.0,
+                 flags: dict = None):
         self.capacity = capacity_kwh
         self.max_power = max_power_kw
         self.efficiency = efficiency
@@ -47,6 +48,13 @@ class LSTMBESSController:
         self.energy = capacity_kwh * soc_initial
         self.peak_threshold = None
         self.demand_target = None   # [§4] 요금적용전력 상한 목표
+
+        # [정정 단계 플래그] 제어기 관여 정정(가·나·다·라·바)을 on/off. 기본 전부 True
+        #   = 현재 최종 제어기와 완전히 동일. (마: 임계값 누수는 외부 threshold 산출에서 처리)
+        _default = {'ga': True, 'na': True, 'da': True, 'ra': True, 'ba': True}
+        self.flags = _default if flags is None else {**_default, **flags}
+        _off = 0.80 if self.flags['na'] else 0.90   # (나) 경부하 SOC 목표
+        self.SOC_TARGETS = {'off_peak': _off, 'mid_peak': 0.60, 'on_peak': 0.20}
 
     def set_demand_cap(self, p_cap: float):
         """[§4] 요금적용전력 상한 목표 설정.
@@ -96,10 +104,12 @@ class LSTMBESSController:
         actual_net_load = max(0.0, actual_load_kw - actual_solar_kw)
         actual_surplus = max(0.0, actual_solar_kw - actual_load_kw)
 
-        # [§4] 요금적용전력(중간·최대부하 시간대)만 상한 관리 대상
+        # [§4/(바)] 요금적용전력 상한 관리 — ba 플래그로 on/off
         peak_hr = tariff in ('mid_peak', 'on_peak')
-        cap = self.demand_target if (peak_hr and self.demand_target is not None) else None
+        cap = self.demand_target if (self.flags['ba'] and peak_hr and self.demand_target is not None) else None
         headroom = max(0.0, cap - actual_net_load) if cap is not None else float('inf')
+        # [(가)] 방전 상한 기준: ga=True → 순부하(역송 방지), False → 부하
+        dref = actual_net_load if self.flags['ga'] else actual_load_kw
 
         bess_pwr = 0.0
         action = 'idle'
@@ -129,10 +139,10 @@ class LSTMBESSController:
                 reason = 'emergency_low'
 
         elif self.soc > self.soc_max - self.EMERGENCY_HIGH:
-            # [수정] actual_load_kw -> actual_net_load로 변경 (역송 완전 차단)
-            if actual_net_load > 0:
+            # [(가)] ga=True 면 순부하, False 면 부하 기준
+            if dref > 0:
                 max_d = self._max_discharge(time_step)
-                discharge_pw = min(self.max_power * 0.5, max_d, actual_net_load)
+                discharge_pw = min(self.max_power * 0.5, max_d, dref)
                 if discharge_pw > 0:
                     bess_pwr = discharge_pw
                     action = 'discharge'
@@ -159,8 +169,11 @@ class LSTMBESSController:
         elif pred_nl > self.peak_threshold and self.soc > self.soc_min:
             excess = pred_nl - self.peak_threshold
             max_d = self._max_discharge(time_step)
-            # [수정] 과도한 방전으로 인한 역송을 막기 위해 actual_net_load 제약 추가
-            discharge_pw = min(excess, self.max_power, max_d, actual_net_load)
+            # [(가)] ga=True 면 역송 방지 순부하 상한 추가
+            _caps = [excess, self.max_power, max_d]
+            if self.flags['ga']:
+                _caps.append(actual_net_load)
+            discharge_pw = min(_caps)
             if discharge_pw > 0:
                 bess_pwr = discharge_pw
                 action = 'discharge'
@@ -173,29 +186,26 @@ class LSTMBESSController:
             soc_diff = soc_target - self.soc
 
             if soc_diff > self.SOC_TOLERANCE:
-                # SOC가 목표보다 낮음 -> 충전
-                # [#3] 계통 충전은 '경부하'에서만 허용한다.
-                #   중간·최대부하 시간대의 비싼 계통 전력(110/180원) 구매 충전을 전면 금지.
-                #   (태양광 잉여 충전 P1 은 시간대 무관하게 위에서 이미 허용됨)
-                is_grid_charge_allowed = (tariff == 'off_peak')
+                # [(다)] da=True 면 계통 충전을 '경부하'에서만 허용, False 면 전 시간대
+                is_grid_charge_allowed = (tariff == 'off_peak') if self.flags['da'] else True
 
                 if self.soc < self.soc_max and is_grid_charge_allowed:
                     max_c = self._max_charge(time_step)
-                    # [정정 라] 충전 오버슈트 클램프: SOC가 목표를 넘어 상승하지
-                    #           않도록 제한 → 다음 스텝의 P0 강제 방전(진동) 억제
-                    clamp = soc_diff * self.capacity / (self.efficiency * time_step)
-                    charge_pw = min(self.max_power * power_ratio, max_c, clamp)
+                    _ccaps = [self.max_power * power_ratio, max_c]
+                    # [(라)] ra=True 면 충전 오버슈트 클램프(진동 억제)
+                    if self.flags['ra']:
+                        _ccaps.append(soc_diff * self.capacity / (self.efficiency * time_step))
+                    charge_pw = min(_ccaps)
                     if charge_pw > 0:
                         bess_pwr = -charge_pw
                         action = 'charge'
                         reason = f'soc_target_{tariff}'
 
             elif soc_diff < -self.SOC_TOLERANCE:
-                # SOC가 목표보다 높음 -> 방전
-                # [수정] actual_load_kw -> actual_net_load로 변경 (역송 방지)
-                if self.soc > self.soc_min and actual_net_load > 0:
+                # [(가)] ga 기준 방전 상한(dref)
+                if self.soc > self.soc_min and dref > 0:
                     max_d = self._max_discharge(time_step)
-                    discharge_pw = min(self.max_power * power_ratio, max_d, actual_net_load)
+                    discharge_pw = min(self.max_power * power_ratio, max_d, dref)
                     if discharge_pw > 0:
                         bess_pwr = discharge_pw
                         action = 'discharge'
