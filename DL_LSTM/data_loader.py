@@ -143,7 +143,7 @@ def generate_sample_smp_data(days: int = 30, seed: int = 43) -> pd.DataFrame:
     np.random.seed(seed)
     ts   = pd.date_range('2025-01-01', periods=days * 24, freq='h')
     bmap = {'on_peak': 160.0, 'mid_peak': 120.0, 'off_peak': 80.0}
-    smps = [max(40.0, bmap[config.get_tariff_period(t.hour)]
+    smps = [max(40.0, bmap[config.get_tariff_period(t.hour, t.month)]
                 + np.random.normal(0, 15)) for t in ts]
     return pd.DataFrame({'timestamp': ts, 'smp': smps})
 
@@ -200,7 +200,8 @@ def add_features(merged: pd.DataFrame) -> pd.DataFrame:
     dt = pd.to_datetime(df['timestamp'])
 
     df['net_load_kw'] = (df['load_kw'] - df['solar_kw']).clip(lower=0)
-    df['tariff_rate'] = df['tariff_period'].map(config.TOU_TARIFF)
+    df['tariff_rate'] = [config.get_tariff_rate(int(h), int(m))
+                         for h, m in zip(dt.dt.hour, dt.dt.month)]
 
     # 순환 인코딩
     df['hour_sin']  = np.sin(2 * np.pi * dt.dt.hour      / 24)
@@ -348,7 +349,8 @@ def load_data(load_path: str = config.LOAD_DATA_PATH,
     df = df.merge(solar_df,      on='timestamp', how='inner')
     df['hour']          = df['timestamp'].dt.hour
     df['date']          = df['timestamp'].dt.date
-    df['tariff_period'] = df['hour'].apply(config.get_tariff_period)
+    df['tariff_period'] = [config.get_tariff_period(int(h), int(m))
+                           for h, m in zip(df['hour'], df['timestamp'].dt.month)]
     df = df.sort_values('timestamp').reset_index(drop=True)
 
     # ── 피처 추가 

@@ -33,6 +33,7 @@ def run_simulation(merged: pd.DataFrame,
             solar_kw = row['solar_kw'],
             hour     = int(row['hour']),
             time_step= config.TIME_STEP_HOURS,
+            month    = int(pd.Timestamp(row['timestamp']).month),
         )
         records.append({
             'timestamp'     : row['timestamp'],
@@ -54,8 +55,10 @@ def run_simulation(merged: pd.DataFrame,
     df['charge_kw']    = df['bess_power_kw'].apply(lambda x: -x if x < 0 else 0.0)
     df['discharge_kw'] = df['bess_power_kw'].apply(lambda x:  x if x > 0 else 0.0)
 
-    # 시간대별 TOU 요금 컬럼
-    df['tariff_rate']  = df['tariff_period'].map(config.TOU_TARIFF)
+    # 시간대별 TOU 요금 컬럼 (계절·시간대별)
+    _month = pd.to_datetime(df['timestamp']).dt.month
+    df['tariff_rate']  = [config.get_tariff_rate(int(h), int(m))
+                          for h, m in zip(df['hour'], _month)]
 
     return df
 
@@ -79,7 +82,9 @@ def run_baseline_simulation(merged: pd.DataFrame) -> pd.DataFrame:
 
     # 계통 전력 = 부하 - 태양광 (음수 = 잉여 판매)
     df['grid_power_kw'] = df['load_kw'] - df['solar_kw']
-    df['tariff_rate']   = df['tariff_period'].map(config.TOU_TARIFF)
+    _month = pd.to_datetime(df['timestamp']).dt.month
+    df['tariff_rate']   = [config.get_tariff_rate(int(h), int(m))
+                           for h, m in zip(df['hour'], _month)]
 
     return df
 

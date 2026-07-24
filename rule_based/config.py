@@ -29,20 +29,55 @@ TARGET_SOC_MAX    = 0.80
 PV_CAPACITY_KW = 50.0
 PV_EFFICIENCY  = 0.18
 
-# 시간대별 전기요금  (한국전력 산업용 갑 II / 고압A)
-TOU_TARIFF = {
-    'off_peak' : 60.0,
-    'mid_peak' : 110.0,
-    'on_peak'  : 180.0,
+# =====================================================================
+#  전력요금 체계 (TOU) — TARIFF_MODE 로 논문(paper)/계절(seasonal) 분기
+#  [중요] 논문 본문 재현에는 반드시 'paper' 로 둘 것 (60/110/180, 식 5).
+#         · 최대부하 : 10,11,13,14,15,16
+#         · 중간부하 : 9,12,17,18,19,20,21,22
+#         · 경부하   : 그 외
+# =====================================================================
+TARIFF_MODE = 'paper'
+
+PAPER_ON_PEAK_HOURS  = {10, 11, 13, 14, 15, 16}
+PAPER_MID_PEAK_HOURS = {9, 12, 17, 18, 19, 20, 21, 22}
+PAPER_TARIFF = {'off_peak': 60.0, 'mid_peak': 110.0, 'on_peak': 180.0}
+
+# 후속과제용: 계절 구분 요금 (산업용(갑)Ⅱ 고압A 선택Ⅱ)
+SEASONAL_TARIFF = {
+    'summer': {'off_peak': 90.8, 'mid_peak': 116.6, 'on_peak': 150.1},
+    'spring': {'off_peak': 90.8, 'mid_peak':  95.6, 'on_peak': 114.8},
+    'winter': {'off_peak': 98.2, 'mid_peak': 115.1, 'on_peak': 144.5},
 }
 
-def get_tariff_period(hour: int) -> str:
-    if hour in [10, 11, 13, 14, 15, 16]:
-        return 'on_peak'
-    elif hour in [9, 12, 17, 18, 19, 20, 21, 22]:
-        return 'mid_peak'
-    else:
+BASE_CHARGE_WON_PER_KW = 7470       # 기본요금 (원/kW·월)
+
+def get_season(month: int) -> str:
+    if month in (6, 7, 8):       return 'summer'
+    if month in (11, 12, 1, 2):  return 'winter'
+    return 'spring'
+
+def get_tariff_period(hour: int, month: int = 6) -> str:
+    if TARIFF_MODE == 'paper':
+        if hour in PAPER_ON_PEAK_HOURS:  return 'on_peak'
+        if hour in PAPER_MID_PEAK_HOURS: return 'mid_peak'
         return 'off_peak'
+    if get_season(month) == 'winter':
+        if 9 <= hour < 12 or 16 <= hour < 19:                   return 'on_peak'
+        if 8 <= hour < 9 or 12 <= hour < 16 or 19 <= hour < 22: return 'mid_peak'
+        return 'off_peak'
+    else:
+        if 15 <= hour < 21:                    return 'on_peak'
+        if 8 <= hour < 15 or 21 <= hour < 22:  return 'mid_peak'
+        return 'off_peak'
+
+def get_tariff_rate(hour: int, month: int = 6) -> float:
+    period = get_tariff_period(hour, month)
+    if TARIFF_MODE == 'paper':
+        return PAPER_TARIFF[period]
+    return SEASONAL_TARIFF[get_season(month)][period]
+
+# 하위 호환: 기존 코드가 config.TOU_TARIFF 를 참조하는 경우 대비
+TOU_TARIFF = SEASONAL_TARIFF
 
 # 시뮬레이션 설정
 TIME_STEP_HOURS  = 1.0

@@ -290,14 +290,7 @@ def _fetch_smp_single_day(url: str, date_str: str,
             if not isinstance(items, list):
                 items = [items] if items else []
 
-            rows = []
-            for it in items:
-                ts = _parse_smp_timestamp(it, base_date)
-                if ts is None:
-                    continue
-                smp_val = _extract_smp_value(it)
-                if smp_val is not None:
-                    rows.append({'timestamp': ts, 'smp': smp_val})
+            rows = _build_rows(items, base_date, date_str)
             return (rows, 'ok')
 
         except Exception as ex:
@@ -307,19 +300,73 @@ def _fetch_smp_single_day(url: str, date_str: str,
     return ([], 'failed')
 
 
-def _parse_smp_timestamp(item: dict, base_date: pd.Timestamp) -> pd.Timestamp | None:
-    """SMP item에서 timestamp 추출"""
+def _raw_hour(item: dict):
+    """item 에서 시각 정수만 추출 (변환하지 않음)"""
     for key in ('hh', 'hour', 'tm', 'baseTime', 'time'):
         if key in item:
             try:
-                h = int(float(str(item[key])[:2]))
-                if 0 <= h <= 23:
-                    return base_date + pd.Timedelta(hours=h)
-                elif 1 <= h <= 24:
-                    return base_date + pd.Timedelta(hours=h - 1)
+                return int(float(str(item[key])[:2]))
             except (ValueError, TypeError):
                 continue
     return None
+
+
+def _detect_hour_convention(items: list) -> str:
+    """
+    하루치 응답 전체의 hh 값 분포로 시각 표기 규약을 판별한다.
+    '1-24' : 전력거래소 표준(hour-ending). hh=n → 시각 라벨 n-1
+    '0-23' : 일반 표기.                    hh=n → 시각 라벨 n
+    """
+    hours = set()
+    for it in items:
+        h = _raw_hour(it)
+        if h is not None:
+            hours.add(h)
+    if not hours:
+        return '1-24'
+    if 0 in hours:
+        return '0-23'
+    if 24 in hours:
+        return '1-24'
+    return '1-24'
+
+
+def _parse_smp_timestamp(item: dict, base_date: pd.Timestamp,
+                         convention: str = '1-24') -> pd.Timestamp | None:
+    """
+    SMP item → timestamp
+    [정정] 규약을 인자로 명시받아, 분기 순서에 따른 오분류를 제거한다.
+    """
+    h = _raw_hour(item)
+    if h is None:
+        return None
+    if convention == '1-24':
+        if 1 <= h <= 24:
+            return base_date + pd.Timedelta(hours=h - 1)
+    else:                       # '0-23'
+        if 0 <= h <= 23:
+            return base_date + pd.Timedelta(hours=h)
+    return None
+
+
+def _build_rows(items: list, base_date: pd.Timestamp, date_str: str) -> list:
+    """하루치 items 전체로 시각 규약을 먼저 판별한 뒤 변환한다."""
+    convention = _detect_hour_convention(items)
+    rows = []
+    for it in items:
+        ts = _parse_smp_timestamp(it, base_date, convention)
+        if ts is None:
+            continue
+        smp_val = _extract_smp_value(it)
+        if smp_val is not None:
+            rows.append({'timestamp': ts, 'smp': smp_val})
+
+    got = {r['timestamp'].hour for r in rows}
+    if len(rows) and len(got) != 24:
+        missing = sorted(set(range(24)) - got)
+        print(f"   [경고] SMP {date_str}: 시각 {len(got)}개만 수신 "
+              f"(규약={convention}, 누락={missing})")
+    return rows
 
 
 def _extract_smp_value(item: dict) -> float | None:
@@ -331,6 +378,29 @@ def _extract_smp_value(item: dict) -> float | None:
             except (ValueError, TypeError):
                 continue
     return None
+
+
+def validate_smp_cache(path: str) -> bool:
+    """수집된 SMP 캐시가 온전한지 검증 (평가 구간 8,760 확인용)."""
+    df = pd.read_csv(path)
+    df.columns = [c.strip('﻿') for c in df.columns]
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    n_days = df['timestamp'].dt.date.nunique()
+    per_hour = df['timestamp'].dt.hour.value_counts()
+    dup = int(df['timestamp'].duplicated().sum())
+    print(f"[SMP 캐시 검증] {path}")
+    print(f"  총 {len(df):,}행 / {n_days}일 / 중복 {dup}건")
+    ok = True
+    if dup:
+        print(f"  [실패] timestamp 중복 {dup}건"); ok = False
+    missing = sorted(set(range(24)) - set(per_hour.index))
+    if missing:
+        print(f"  [실패] 결측 시각대: {missing}  ← 파서 규약 오류 의심"); ok = False
+    if len(df) != n_days * 24:
+        print(f"  [실패] 기대 {n_days*24:,}행 ≠ 실제 {len(df):,}행"); ok = False
+    if ok:
+        print(f"  [정상] 24시각 × {n_days}일 = {len(df):,}행 완전")
+    return ok
 
 
 def _find_partial_smp_cache(start_date: str, end_date: str) -> pd.DataFrame | None:

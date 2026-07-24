@@ -9,7 +9,7 @@ from data_loader  import (load_data, make_sequences, split_sequences,
 from models.gru_model  import train, predict, load_model
 from bess_controller    import GRUBESSController
 from simulator          import run_gru_simulation, run_baseline_simulation
-from evaluator          import evaluate_all, print_report, print_comparison
+from evaluator          import evaluate_all, print_report
 from visualizer         import (plot_training_curve, plot_prediction,
                                  plot_daily_operation, plot_soc_trend,
                                  plot_comparison, plot_radar)
@@ -216,3 +216,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+    

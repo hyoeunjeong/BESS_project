@@ -249,8 +249,7 @@ if __name__ == '__main__':
     update_thread.start()
     print("[시작] 실시간 업데이트 스레드 시작")
     
-    print("\n[서버] http://0.0.0.0:5000 에서 실행 중...")
-    print("[접속] http://localhost:5000 (로컬)")
-    print("[접속] http://<Pi4-IP>:5000 (원격)\n")
-    
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    print("\n[서버] http://127.0.0.1:5000 에서 실행 중... (로컬 전용)")
+    print("[접속] http://localhost:5000 (이 PC에서만 접속 가능)\n")
+
+    socketio.run(app, host='127.0.0.1', port=5000, debug=False, allow_unsafe_werkzeug=True)

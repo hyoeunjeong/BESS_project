@@ -72,7 +72,8 @@ def merge_real_data(load_df: pd.DataFrame, smp_df: pd.DataFrame,
     df = df.merge(solar_df,      on='timestamp', how='inner')
     df['hour']          = df['timestamp'].dt.hour
     df['date']          = df['timestamp'].dt.date
-    df['tariff_period'] = df['hour'].apply(config.get_tariff_period)
+    df['tariff_period'] = [config.get_tariff_period(int(h), int(m))
+                           for h, m in zip(df['hour'], df['timestamp'].dt.month)]
     return df.sort_values('timestamp').reset_index(drop=True)
 
 
@@ -98,7 +99,7 @@ def generate_sample_smp_data(days: int = 30, seed: int = 43) -> pd.DataFrame:
     np.random.seed(seed)
     timestamps = pd.date_range('2025-01-01', periods=days * 24, freq='h')
     base_map = {'on_peak': 160.0, 'mid_peak': 120.0, 'off_peak': 80.0}
-    smps = [max(40.0, base_map[config.get_tariff_period(ts.hour)]
+    smps = [max(40.0, base_map[config.get_tariff_period(ts.hour, ts.month)]
                 + np.random.normal(0, 15)) for ts in timestamps]
     return pd.DataFrame({'timestamp': timestamps, 'smp': smps})
 

@@ -1,0 +1,9 @@
+{
+    "python.defaultInterpreterPath": "C:\\Users\\jhe03\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+    "python.analysis.extraPaths": [
+        "DL_GRU",
+        "DL_LSTM",
+        "rule_based",
+        "web_dashboard"
+    ]
+}

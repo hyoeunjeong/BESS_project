@@ -575,6 +575,7 @@ class RealtimeEngine:
                     actual_solar_kw=data['solar_kw'],
                     hour=data['hour'],
                     time_step=config.TIME_STEP_HOURS,
+                    month=datetime.now().month,
                 )
 
                 state = {
@@ -584,7 +585,7 @@ class RealtimeEngine:
                     'charge_kw': max(0, -result['bess_power_kw']),
                     'discharge_kw': max(0, result['bess_power_kw']),
                     'grid_power_kw': result['grid_power_kw'],
-                    'tariff_rate': config.TOU_TARIFF.get(result['tariff_period'], 0),
+                    'tariff_rate': config.get_tariff_rate(int(data['hour']), datetime.now().month),
                     'tariff_period': result['tariff_period'],
                     'action': result['action'],
                 }

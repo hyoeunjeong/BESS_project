@@ -15,7 +15,9 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
 
     # 피크 임계값: 테스트 기간 실제 부하 기준
     test_df = merged_df.iloc[test_start_idx: test_start_idx + len(predicted_nl)]
-    controller.set_peak_threshold(test_df['load_kw'].values)
+    # 정정(마): 데이터 누수 차단 — 피크 임계값은 학습 구간(앞 70%) 부하로만 산출
+    n_train = int(len(test_df) * config.TRAIN_RATIO)
+    controller.set_peak_threshold(test_df['load_kw'].values[:n_train])
 
     records = []
     for i, (_, row) in enumerate(test_df.iterrows()):
@@ -28,6 +30,7 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
             actual_solar_kw    = float(row['solar_kw']),
             hour               = int(row['hour']),
             time_step          = config.TIME_STEP_HOURS,
+            month              = int(pd.Timestamp(row['timestamp']).month),
         )
 
         records.append({
@@ -47,7 +50,9 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
     df = pd.DataFrame(records)
     df['charge_kw']    = df['bess_power_kw'].apply(lambda x: -x if x < 0 else 0.0)
     df['discharge_kw'] = df['bess_power_kw'].apply(lambda x:  x if x > 0 else 0.0)
-    df['tariff_rate']  = df['tariff_period'].map(config.TOU_TARIFF)
+    _month = pd.to_datetime(df['timestamp']).dt.month
+    df['tariff_rate']  = [config.get_tariff_rate(int(h), int(m))
+                          for h, m in zip(df['hour'], _month)]
     return df
 
 
@@ -59,5 +64,7 @@ def run_baseline_simulation(test_df: pd.DataFrame) -> pd.DataFrame:
     df['soc']           = 0.0
     df['action']        = 'none'
     df['grid_power_kw'] = df['load_kw'] - df['solar_kw']
-    df['tariff_rate']   = df['tariff_period'].map(config.TOU_TARIFF)
+    _month = pd.to_datetime(df['timestamp']).dt.month
+    df['tariff_rate']   = [config.get_tariff_rate(int(h), int(m))
+                           for h, m in zip(df['hour'], _month)]
     return df

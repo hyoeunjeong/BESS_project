@@ -9,13 +9,13 @@ from data_loader  import (load_data, make_sequences, split_sequences,
 from models.lstm_model  import train, predict, load_model
 from bess_controller    import LSTMBESSController
 from simulator          import run_lstm_simulation, run_baseline_simulation
-from evaluator          import evaluate_all, print_report, print_comparison
+from evaluator          import evaluate_all, print_report
 from visualizer         import (plot_training_curve, plot_prediction,
                                  plot_daily_operation, plot_soc_trend,
                                  plot_comparison, plot_radar)
 
 # 옵션
-SKIP_TRAINING = False   # True → 저장된 모델(.pt) 로드 (학습 건너뜀)
+SKIP_TRAINING = True   # True → 저장된 모델(.pt) 로드 (학습 건너뜀)
 FULL_YEAR     = True   # True → 1년치 전체 시뮬레이션 (월별 비교용)
                         # False → 테스트셋(15%, 약 55일)만 시뮬레이션 (기존 동작)
 

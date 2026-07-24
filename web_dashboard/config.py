@@ -1,5 +1,10 @@
 """
 API 키는 .env 파일에서 로드한다.
+
+[주의] 이 설정은 대시보드 전용이며 논문 실험과 무관하다.
+       논문 재현은 rule_based / DL_LSTM / DL_GRU 의 config.py
+       (TARIFF_MODE='paper') 를 사용한다. 이 파일의 요금 체계는
+       변경하지 않았다(계절별 seasonal 유지).
 """
 
 import os
@@ -48,20 +53,32 @@ SITE_LATITUDE     = 37.5301
 SITE_LONGITUDE    = 127.1238
 SITE_NAME         = '서울 강동구 도시기반시설본부 (모델 시뮬레이션)'
 
-# 시간대별 전기요금  (한국전력 산업용 / 고압A)
-TOU_TARIFF = {
-    'off_peak' : 60.0,
-    'mid_peak' : 110.0,
-    'on_peak'  : 180.0,
+# 시간대별 전기요금 (한국전력 산업용(갑)Ⅱ 고압A 선택Ⅱ, 계절별)
+TOU_TARIFF = {                      # 산업용(갑)Ⅱ 고압A 선택Ⅱ
+    'summer': {'off_peak': 90.8, 'mid_peak': 116.6, 'on_peak': 150.1},
+    'spring': {'off_peak': 90.8, 'mid_peak':  95.6, 'on_peak': 114.8},
+    'winter': {'off_peak': 98.2, 'mid_peak': 115.1, 'on_peak': 144.5},
 }
+BASE_CHARGE_WON_PER_KW = 7470       # 기본요금
 
-def get_tariff_period(hour: int) -> str:
-    if hour in [10, 11, 13, 14, 15, 16]:
-        return 'on_peak'
-    elif hour in [9, 12, 17, 18, 19, 20, 21, 22]:
-        return 'mid_peak'
-    else:
+def get_season(month: int) -> str:
+    if month in (6, 7, 8):       return 'summer'
+    if month in (11, 12, 1, 2):  return 'winter'
+    return 'spring'
+
+def get_tariff_period(hour: int, month: int = 6) -> str:
+    if get_season(month) == 'winter':
+        if 9 <= hour < 12 or 16 <= hour < 19:                   return 'on_peak'
+        if 8 <= hour < 9 or 12 <= hour < 16 or 19 <= hour < 22: return 'mid_peak'
         return 'off_peak'
+    else:
+        if 15 <= hour < 21:                    return 'on_peak'
+        if 8 <= hour < 15 or 21 <= hour < 22:  return 'mid_peak'
+        return 'off_peak'
+
+def get_tariff_rate(hour: int, month: int = 6) -> float:
+    """(월, 시간) → 계절·시간대별 전력량요금(원/kWh)"""
+    return TOU_TARIFF[get_season(month)][get_tariff_period(hour, month)]
 
 # 시뮬레이션 설정
 TIME_STEP_HOURS  = 1.0

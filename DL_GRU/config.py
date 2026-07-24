@@ -31,15 +31,19 @@ TARGET_SOC_MAX    = 0.80
 PV_CAPACITY_KW    = 50.0     # PCS 용량 (강동구 도시기반시설본부와 동일)
 PV_EFFICIENCY     = 0.21     # 모듈 효율 (한국 표준 단결정 PERC)
 
-# 설치 조건 (한국 표준)
+# ─────────────────────────────────────────────────────────────────────
+# [주의] 아래 물성치·시스템 효율 상수는 solar_estimator.py(기상청 단기예보
+#        기반 물리 모델) 전용이며, 본 논문의 시뮬레이션 경로에서는
+#        사용되지 않는다.
+#        논문 실험의 태양광은 data_loader._load_solar_from_rb_cache() 의
+#            solar_kw = clip(icsr * PV_CAPACITY_KW * 0.2778, 0, PV_CAPACITY_KW)
+#        간이 선형 모델로 산출된다 (논문 식 (3)).
+#        → 성능비·인버터 효율·온도 보정 미반영. 논문 2.4.2 (2) 참조.
+# ─────────────────────────────────────────────────────────────────────
 PV_AZIMUTH        = 180.0    # 방위각: 정남향
 PV_TILT           = 30.0     # 경사각 (서울 위도 37.5° 최적값)
-
-# 패널 물성치 (KS C 8526 표준)
 PV_TEMP_COEFF     = -0.0040  # 온도계수 -0.40%/°C (25°C 이탈 시)
 PV_NOCT           = 45.0     # 공칭 작동 셀온도 (°C)
-
-# 시스템 효율
 PV_PR             = 0.78     # Performance Ratio (한국 평균)
 PV_INVERTER_EFF   = 0.96     # 인버터 효율 (KS 인증 기준)
 
@@ -48,26 +52,91 @@ SITE_LATITUDE     = 37.5301
 SITE_LONGITUDE    = 127.1238
 SITE_NAME         = '서울 강동구 도시기반시설본부 (모델 시뮬레이션)'
 
-# 시간대별 전기요금  (한국전력 산업용 / 고압A)
-TOU_TARIFF = {
-    'off_peak' : 60.0,
-    'mid_peak' : 110.0,
-    'on_peak'  : 180.0,
+
+# =====================================================================
+#  전력요금 체계 (TOU, Time-of-Use)
+# ---------------------------------------------------------------------
+#  TARIFF_MODE
+#    'paper'    : 논문 본문 실험 조건 (기본값).
+#                 한국전력공사 산업용(을) 고압A 여름철 TOU 시간대 구분을
+#                 연중 단일 구조로 단순화하고, 단가를 60/110/180 원/kWh 로
+#                 고정한다.  → 논문 식 (5)
+#                 · 최대부하 : 10-12시, 13-17시
+#                 · 중간부하 : 09-10시, 12-13시, 17-23시
+#                 · 경부하   : 23-09시
+#
+#    'seasonal' : 계절(여름/봄가을/겨울)을 구분한 실제 요금 구조.
+#                 논문 3.2 아홉째 후속과제(계절별 요금 재검증)용이며,
+#                 본문 결과 재현에는 사용하지 않는다.
+#
+#  [중요] 이 값을 바꾸면 논문 표 2.7~2.12 의 모든 수치가 달라진다.
+#         본문 결과를 재현하려면 반드시 'paper' 로 둘 것.
+# =====================================================================
+TARIFF_MODE = 'paper'
+
+
+# ── (A) 논문 조건: 연중 단일 시간대 구분 + 단일 단가 ──────────────
+PAPER_ON_PEAK_HOURS  = {10, 11, 13, 14, 15, 16}
+PAPER_MID_PEAK_HOURS = {9, 12, 17, 18, 19, 20, 21, 22}
+PAPER_TARIFF = {'off_peak': 60.0, 'mid_peak': 110.0, 'on_peak': 180.0}
+
+
+# ── (B) 후속과제용: 계절 구분 요금 (산업용(갑)Ⅱ 고압A 선택Ⅱ) ─────
+SEASONAL_TARIFF = {
+    'summer': {'off_peak': 90.8, 'mid_peak': 116.6, 'on_peak': 150.1},
+    'spring': {'off_peak': 90.8, 'mid_peak':  95.6, 'on_peak': 114.8},
+    'winter': {'off_peak': 98.2, 'mid_peak': 115.1, 'on_peak': 144.5},
 }
 
-def get_tariff_period(hour: int) -> str:
-    if hour in [10, 11, 13, 14, 15, 16]:
-        return 'on_peak'
-    elif hour in [9, 12, 17, 18, 19, 20, 21, 22]:
-        return 'mid_peak'
-    else:
+# 기본요금 (원/kW·월) — 최대수요전력 기준으로 부과된다.
+# 논문 2.8.2.4 의 '최대수요전력 증가 → 기본요금 증가' 정량화에 사용.
+# ※ 인용하는 요금제(산업용 을/갑Ⅱ, 선택Ⅰ/Ⅱ)에 따라 값이 달라지므로
+#    논문에 수치를 싣기 전에 한국전력공사 요금표로 반드시 재확인할 것.
+BASE_CHARGE_WON_PER_KW = 7470
+
+
+def get_season(month: int) -> str:
+    if month in (6, 7, 8):       return 'summer'
+    if month in (11, 12, 1, 2):  return 'winter'
+    return 'spring'
+
+
+def get_tariff_period(hour: int, month: int = 6) -> str:
+    """(시간, 월) → 요금 시간대 구분.  TARIFF_MODE 에 따라 분기한다."""
+    if TARIFF_MODE == 'paper':
+        # 연중 단일 구조 → month 는 사용하지 않는다 (시그니처 호환용)
+        if hour in PAPER_ON_PEAK_HOURS:  return 'on_peak'
+        if hour in PAPER_MID_PEAK_HOURS: return 'mid_peak'
         return 'off_peak'
+
+    # 'seasonal'
+    if get_season(month) == 'winter':
+        if 9 <= hour < 12 or 16 <= hour < 19:                   return 'on_peak'
+        if 8 <= hour < 9 or 12 <= hour < 16 or 19 <= hour < 22: return 'mid_peak'
+        return 'off_peak'
+    else:
+        if 15 <= hour < 21:                    return 'on_peak'
+        if 8 <= hour < 15 or 21 <= hour < 22:  return 'mid_peak'
+        return 'off_peak'
+
+
+def get_tariff_rate(hour: int, month: int = 6) -> float:
+    """(시간, 월) → 전력량요금 단가 (원/kWh)"""
+    period = get_tariff_period(hour, month)
+    if TARIFF_MODE == 'paper':
+        return PAPER_TARIFF[period]
+    return SEASONAL_TARIFF[get_season(month)][period]
+
+
+# 하위 호환: 기존 코드가 config.TOU_TARIFF 를 참조하는 경우 대비
+TOU_TARIFF = SEASONAL_TARIFF
+
 
 # 시뮬레이션 설정
 TIME_STEP_HOURS  = 1.0
 SIMULATION_DAYS  = 30
 
-# LSTM 하이퍼파라미터
+# LSTM / GRU 하이퍼파라미터
 SEQ_LEN         = 24
 PRED_HORIZON    = 1
 
@@ -81,6 +150,9 @@ PATIENCE        = 10
 
 TRAIN_RATIO = 0.70
 VAL_RATIO   = 0.15
+
+# 재현성 (논문 표 2.3): random / numpy / torch 공통 시드
+RANDOM_SEED = 42
 
 # 경로
 LOAD_DATA_PATH   = 'data/load_data.csv'
@@ -133,3 +205,22 @@ FORECAST_NY = 126
 
 # Flask 보안 키 (.env에서 로드)
 FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'bess-monitoring-default-secret-change-me')
+
+
+# ── 자기 점검 (python config.py 로 실행) ──────────────────────────
+if __name__ == '__main__':
+    print(f"TARIFF_MODE = {TARIFF_MODE}\n")
+    label = {'off_peak': '경부하', 'mid_peak': '중간부하', 'on_peak': '최대부하'}
+    for mo, season in ((6, '여름'), (4, '봄가을'), (12, '겨울')):
+        buckets = {'off_peak': [], 'mid_peak': [], 'on_peak': []}
+        for h in range(24):
+            buckets[get_tariff_period(h, mo)].append(h)
+        print(f"[{season} (m={mo})]")
+        for p in ('off_peak', 'mid_peak', 'on_peak'):
+            hrs = buckets[p]
+            print(f"  {label[p]:5s} {get_tariff_rate(hrs[0], mo):6.1f}원/kWh  "
+                  f"{len(hrs):2d}h  {hrs}")
+        print()
+        if TARIFF_MODE == 'paper':
+            print("  (연중 단일 구조이므로 계절 무관 — 이하 생략)")
+            break

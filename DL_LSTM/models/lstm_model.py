@@ -9,6 +9,7 @@ DNN·RNN·Transformer 등 다른 아키텍처는 사용하지 않습니다.
 """
 
 import os
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,6 +18,16 @@ from torch.utils.data import DataLoader, TensorDataset
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import config
+
+
+def set_seed(seed: int = 42):
+    """논문 표 2.3: 재현성을 위해 random/numpy/torch 시드를 고정한다."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 # =====================================================================
@@ -72,7 +83,7 @@ class BESSLSTMModel(nn.Module):
 # =====================================================================
 def train(X_train: np.ndarray, y_train: np.ndarray,
           X_val  : np.ndarray, y_val  : np.ndarray,
-          n_features: int) -> tuple:
+          n_features: int, seed: int = None) -> tuple:
     """
     LSTM 모델 학습 (Early Stopping 포함)
 
@@ -87,8 +98,9 @@ def train(X_train: np.ndarray, y_train: np.ndarray,
     model   : 최적 가중치가 로드된 BESSLSTMModel
     history : {'train_loss': [...], 'val_loss': [...]}
     """
+    set_seed(config.RANDOM_SEED if seed is None else seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[LSTM 학습] 디바이스: {device}  |  "
+    print(f"[LSTM 학습] 디바이스: {device}  (seed={config.RANDOM_SEED if seed is None else seed})  |  "
           f"파라미터 - hidden:{config.LSTM_HIDDEN}  "
           f"layers:{config.LSTM_LAYERS}  "
           f"dropout:{config.DROPOUT}  "

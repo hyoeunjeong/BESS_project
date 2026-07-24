@@ -4018,4 +4018,4 @@ if __name__ == '__main__':
     print("[기능] 전력흐름 클릭 -> 일일 상세 모달")
     print("[기능] 비교 표 -> 1시간 평균값으로 표시\n")
     
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='127.0.0.1', port=5000, debug=False, allow_unsafe_werkzeug=True)
