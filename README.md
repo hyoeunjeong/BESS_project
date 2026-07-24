@@ -273,7 +273,8 @@ Bess_Project/
     └── realtime_engine.py
 ```
 
-> `results/` · `comparison_results/` 산출물은 `.gitignore` 대상이며, 위 스크립트 실행으로 언제든 재생성된다.
+> 논문 표·그림·근거 CSV(`results/*.csv`, `figures/*.png`)는 **저장소에 포함**된다. 대용량 중간 산출물
+> (`results/*.npy`, 각 `*/results/` 시뮬 CSV)과 `comparison_results/`는 `.gitignore` 대상이며, 모두 위 스크립트로 재생성된다.
 
 ---
 
@@ -330,7 +331,7 @@ python make_figures.py     # → figures/fig_2_03.png ~ fig_2_12.png (300dpi)
 - **표 2.15** 수요저감 계수 κ(0.85/0.90/0.95) 민감도. κ=0.90 사전 설계값 고정.
 - **그림 2.5** 정정 단계별 순절감액·요금적용전력(이중 y축, (바)에서 부호 반전 시각화). 2.1·2.2는 개념도로 별도 유지.
 
-> `results/` · `figures/` 산출물은 `.gitignore` 대상이며 위 스크립트로 언제든 재생성된다.
+> 논문 표(`results/*.csv`)·그림(`figures/*.png`)은 **저장소에 포함**되어 있으며, 위 두 줄로 언제든 재생성된다.
 
 ### 9.5 웹 대시보드
 
