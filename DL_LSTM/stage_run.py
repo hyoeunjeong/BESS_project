@@ -15,6 +15,8 @@ import os
 import numpy as np
 import pandas as pd
 
+from bess_controller import LSTMBESSController
+
 REPO    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS = os.path.join(REPO, 'results')
 
@@ -33,49 +35,20 @@ def _sec(tp):
 
 
 def simulate(df, pred, flags, thr, tgt_cap):
-    """flags: dict(ga,na,da,ra,ba)  ※ ma(임계값 누수)는 thr 인자로 반영."""
-    TG = TG_NEW if flags['na'] else TG_OLD
-    E = CAP * 0.5
+    """[통일] 라이브 LSTMBESSController 를 flags 로 호출한다(제어 로직 재구현 제거).
+    ma(임계값 누수)는 thr 로, 수요목표는 tgt_cap 으로 주입."""
+    ctrl = LSTMBESSController(flags=flags)
+    ctrl.peak_threshold = thr
+    ctrl.demand_target  = tgt_cap
     rows = []
-    for i, r in enumerate(df.itertuples()):
-        soc = E / CAP
-        sec = _sec(r.tp)
-        load, solar = r.load_kw, r.solar_kw
-        nl_act = max(0., load - solar); sur = max(0., solar - load)
-        dcap = nl_act if flags['ga'] else load                 # (가)
-        peak_hr = sec in ('mid', 'on')
-        head = max(0., tgt_cap - nl_act) if (flags['ba'] and peak_hr) else 1e9  # (바)
-        mc = (SMAX - soc) * CAP / EFF; md = (soc - SMIN) * CAP * EFF
-        p = 0.; act = 'idle'
-        if flags['ba'] and peak_hr and nl_act > tgt_cap and soc > SMIN:   # P0' (바)
-            d = min(nl_act - tgt_cap, PMAX, md, dcap)
-            if d > 0: p, act = d, 'discharge'
-        elif soc < SMIN + EPS:                                  # P0 비상 충전
-            c = min(PMAX * 0.5, mc, head)
-            if c > 0: p, act = -c, 'charge'
-        elif soc > SMAX - EPS:                                  # P0 비상 방전
-            d = min(PMAX * 0.5, md, dcap)
-            if d > 0: p, act = d, 'discharge'
-        elif sur > 0 and soc < SMAX:                            # P1 잉여 충전(실측)
-            c = min(sur, PMAX, mc)
-            if c > 0: p, act = -c, 'charge'
-        elif pred[i] > thr and soc > SMIN:                      # P2 피크 컷
-            cap2 = dcap if flags['ga'] else PMAX                # (가) 정정 전엔 부하 상한 없음
-            d = min(pred[i] - thr, PMAX, md, cap2)
-            if d > 0: p, act = d, 'discharge'
-        else:                                                  # P3 SOC 목표 추종
-            sd = TG[sec] - soc
-            if sd > DLT and soc < SMAX:
-                allow = (sec == 'off') if flags['da'] else True    # (다)
-                if allow:
-                    clamp = sd * CAP / EFF if flags['ra'] else 1e9  # (라)
-                    c = min(PMAX * PR[sec], mc, clamp, head)
-                    if c > 0: p, act = -c, 'charge'
-            elif sd < -DLT and soc > SMIN:
-                d = min(PMAX * PR[sec], md, dcap)
-                if d > 0: p, act = d, 'discharge'
-        E = min(max(E + ((-p * EFF) if p < 0 else (-p / EFF)), 0), CAP)
-        rows.append((p, E / CAP, act))
+    for i, r in enumerate(df.itertuples(index=False)):
+        ts = pd.Timestamp(r.timestamp)
+        res = ctrl.control(predicted_net_load=float(pred[i]),
+                           actual_load_kw=float(r.load_kw),
+                           actual_solar_kw=float(r.solar_kw),
+                           hour=int(ts.hour), month=int(ts.month),
+                           weekday=int(ts.weekday()), date=ts.date())
+        rows.append((res['bess_power_kw'], res['soc'], res['action']))
     return pd.DataFrame(rows, columns=['bess', 'soc', 'action'])
 
 
