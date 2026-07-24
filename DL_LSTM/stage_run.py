@@ -1,14 +1,12 @@
 """[논문표] 표 2.11 정정 단계별 운영 성능 변화 + 표 2.15 κ 민감도
 
 여섯 정정을 플래그(ga,na,da,ra,ba + thr)로 on/off 하며 A~F 단계를 순차
-시뮬레이션한다. 예측값은 모든 단계에서 동일하므로 단계 간 차이는 오직 제어
-로직에서만 발생한다. 지시서 참조 구현(stage_run.py)의 알고리즘·자체 평가식을
-그대로 따르되, 저장소 base_data 의 시간대 라벨('off_peak'…)에 맞춰 매핑했다.
+시뮬레이션한다.
+[통일] 라이브 LSTMBESSController(제어) 와 evaluator.evaluate_all(지표) 을
+그대로 공유하므로, F 단계(모든 플래그 ON)는 compare.py 의 LSTM 값과 일치한다.
 
-전용 모듈이므로 라이브 DL_LSTM/bess_controller.py 는 건드리지 않는다.
 입력: results/base_data.csv, results/pred_lstm.npy
 출력: results/table_2_11_stages.csv, results/table_2_15_kappa.csv
-
 실행: cd DL_LSTM && python stage_run.py
 """
 import os
@@ -16,31 +14,21 @@ import numpy as np
 import pandas as pd
 
 from bess_controller import LSTMBESSController
+from evaluator import evaluate_all
 
 REPO    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS = os.path.join(REPO, 'results')
 
 CAP, PMAX, EFF, SMIN, SMAX = 100., 25., 0.95, 0.10, 0.90
-TG_NEW = {'off': 0.80, 'mid': 0.60, 'on': 0.20}   # 정정 (나) 이후
-TG_OLD = {'off': 0.90, 'mid': 0.60, 'on': 0.20}   # 초기 설계
-PR     = {'off': 0.80, 'mid': 0.50, 'on': 1.00}
-EPS = DLT = 0.05
 SEQ = 24
-BASE_CHARGE = 7470          # 원/kW·월
-
-
-def _sec(tp):
-    """base_data 시간대 라벨('off_peak'/'mid_peak'/'on_peak') → 'off'/'mid'/'on'."""
-    return tp.split('_')[0]
 
 
 def simulate(df, pred, flags, thr, tgt_cap):
-    """[통일] 라이브 LSTMBESSController 를 flags 로 호출한다(제어 로직 재구현 제거).
-    ma(임계값 누수)는 thr 로, 수요목표는 tgt_cap 으로 주입."""
+    """[통일] 라이브 LSTMBESSController 를 flags 로 호출 → 전체 결과 DataFrame."""
     ctrl = LSTMBESSController(flags=flags)
     ctrl.peak_threshold = thr
     ctrl.demand_target  = tgt_cap
-    rows = []
+    recs = []
     for i, r in enumerate(df.itertuples(index=False)):
         ts = pd.Timestamp(r.timestamp)
         res = ctrl.control(predicted_net_load=float(pred[i]),
@@ -48,34 +36,67 @@ def simulate(df, pred, flags, thr, tgt_cap):
                            actual_solar_kw=float(r.solar_kw),
                            hour=int(ts.hour), month=int(ts.month),
                            weekday=int(ts.weekday()), date=ts.date())
-        rows.append((res['bess_power_kw'], res['soc'], res['action']))
-    return pd.DataFrame(rows, columns=['bess', 'soc', 'action'])
+        recs.append((r.timestamp, r.load_kw, r.solar_kw, r.smp,
+                     res['tariff_period'], r.rate, res['bess_power_kw'],
+                     res['grid_power_kw'], res['soc'], res['action'], res['reason']))
+    out = pd.DataFrame(recs, columns=['timestamp', 'load_kw', 'solar_kw', 'smp',
+        'tariff_period', 'tariff_rate', 'bess_power_kw', 'grid_power_kw',
+        'soc', 'action', 'reason'])
+    out['charge_kw']    = out['bess_power_kw'].apply(lambda x: -x if x < 0 else 0.0)
+    out['discharge_kw'] = out['bess_power_kw'].apply(lambda x:  x if x > 0 else 0.0)
+    return out
 
 
-def evaluate(df, res):
-    grid = df.load_kw - df.solar_kw - res.bess
-    base = (df.load_kw - df.solar_kw).clip(lower=0)
-    mo   = df.tp.isin(['mid_peak', 'on_peak'])
-    on   = df.tp == 'on_peak'
-    cb = (base * df.rate).sum(); cr = (grid.clip(lower=0) * df.rate).sum()
-    cb_on = (base[on] * df.rate[on]).sum(); cr_on = (grid.clip(lower=0)[on] * df.rate[on]).sum()
-    ch = (-res.bess).clip(lower=0); di = res.bess.clip(lower=0)
-    pk_b = base[mo].max(); pk_r = grid.clip(lower=0)[mo].max()
-    dchg = (pk_r - pk_b) * BASE_CHARGE * 12
-    exp = (-grid).clip(lower=0)
-    act = res.action.tolist()
+def _baseline(sim):
+    """무제어 기준 — evaluator 공유용 전체 DataFrame."""
+    b = sim.rename(columns={'tp': 'tariff_period', 'rate': 'tariff_rate'}).copy()
+    for c in ('bess_power_kw', 'charge_kw', 'discharge_kw', 'soc'):
+        b[c] = 0.0
+    b['action'] = 'none'
+    b['grid_power_kw'] = b['load_kw'] - b['solar_kw']
+    return b
+
+
+def metrics9(m):
+    """evaluate_all 결과 → 표 2.11 의 9개 지표."""
+    e, en, st = m['economic'], m['energy'], m['stability']
     return {
-        '요금절감률(%)'    : round((cb - cr) / cb * 100, 2),
-        '최대부하절감률(%)': round((cb_on - cr_on) / cb_on * 100, 2),
-        '요금적용전력(kW)' : round(pk_r, 2),
-        '기본요금증감(원)' : round(dchg, 0),
-        '순절감액(원)'     : round((cb - cr) - dchg, 0),
-        '역송(kWh)'        : round(float(np.minimum(di, exp).sum()), 0),
-        'SOC체류(%)'       : round(float(((res.soc >= .2) & (res.soc <= .8)).mean() * 100), 2),
-        '전환(회/일)'      : round(sum(1 for k in range(1, len(res))
-                                     if {act[k-1], act[k]} == {'charge', 'discharge'}) / (len(res) / 24), 2),
-        '사이클'           : round(float((ch.sum() + di.sum()) / 200), 2),
+        '요금절감률(%)'    : e['cost_saving_rate_pct'],
+        '최대부하절감률(%)': e['peak_saving_rate_pct'],
+        '요금적용전력(kW)' : e['peak_demand_kw'],
+        '기본요금증감(원)' : e['base_charge_delta_won'],
+        '순절감액(원)'     : e['net_saving_won'],
+        '역송(kWh)'        : round(en.get('bess_export_kwh', 0.0), 0),
+        'SOC체류(%)'       : st['soc_in_band_rate_pct'],
+        '전환(회/일)'      : st['transitions_per_day'],
+        '사이클'           : st['cycle_count'],
     }
+
+
+def _rule_based(sim):
+    """단순 TOU 3규칙 — 전체 결과 DataFrame(evaluator 공유)."""
+    E = CAP * 0.5
+    recs = []
+    for r in sim.itertuples(index=False):
+        soc = E / CAP; nl = r.load_kw - r.solar_kw; p = 0.; a = 'idle'
+        sec = r.tp.split('_')[0]
+        if nl < 0:
+            mc = (SMAX - soc) * CAP / EFF
+            if mc > 0: p = -min(-nl, PMAX, mc); a = 'charge'
+        elif nl > 0 and sec in ('on', 'mid'):
+            md = (soc - SMIN) * CAP * EFF
+            if md > 0: p = min(nl, PMAX, md); a = 'discharge'
+        if a == 'idle' and sec == 'off' and soc < SMAX:
+            mc = (SMAX - soc) * CAP / EFF
+            if mc > 0: p = -min(PMAX, mc); a = 'charge'
+        E = min(max(E + ((-p * EFF) if p < 0 else (-p / EFF)), 0), CAP)
+        recs.append((r.timestamp, r.load_kw, r.solar_kw, r.smp, r.tp, r.rate,
+                     p, r.load_kw - r.solar_kw - p, E / CAP, a))
+    out = pd.DataFrame(recs, columns=['timestamp', 'load_kw', 'solar_kw', 'smp',
+        'tariff_period', 'tariff_rate', 'bess_power_kw', 'grid_power_kw', 'soc', 'action'])
+    out['charge_kw']    = out['bess_power_kw'].apply(lambda x: -x if x < 0 else 0.0)
+    out['discharge_kw'] = out['bess_power_kw'].apply(lambda x:  x if x > 0 else 0.0)
+    return out
 
 
 OFF = dict(ga=0, na=0, da=0, ra=0, ba=0)
@@ -88,24 +109,6 @@ STAGES = [
     ('E',  {**OFF, 'ga': 1, 'na': 1, 'da': 1, 'ra': 1}, 'train'),
     ('F',  dict(ga=1, na=1, da=1, ra=1, ba=1),     'train'),
 ]
-
-
-def _rule_based(sim):
-    E = CAP * 0.5; rows = []
-    for r in sim.itertuples():
-        nl = r.load_kw - r.solar_kw; p = 0.; a = 'idle'; soc = E / CAP
-        if nl < 0:
-            mc = (SMAX - soc) * CAP / EFF
-            if mc > 0: p = -min(-nl, PMAX, mc); a = 'charge'
-        elif nl > 0 and _sec(r.tp) in ('on', 'mid'):
-            md = (soc - SMIN) * CAP * EFF
-            if md > 0: p = min(nl, PMAX, md); a = 'discharge'
-        if a == 'idle' and _sec(r.tp) == 'off' and soc < SMAX:
-            mc = (SMAX - soc) * CAP / EFF
-            if mc > 0: p = -min(PMAX, mc); a = 'charge'
-        E = min(max(E + ((-p * EFF) if p < 0 else (-p / EFF)), 0), CAP)
-        rows.append((p, E / CAP, a))
-    return pd.DataFrame(rows, columns=['bess', 'soc', 'action'])
 
 
 def main():
@@ -122,14 +125,15 @@ def main():
     mo = sim.tp.isin(['mid_peak', 'on_peak'])
     P_CAP = float(nl[:ntr][mo[:ntr]].max())
     TGT = P_CAP * 0.90
+    baseline = _baseline(sim)
     print(f"피크 임계값  전구간 {thr_full:.2f} kW / 학습구간 {thr_train:.2f} kW")
     print(f"목표 수요전력 P_tgt = {P_CAP:.2f} × 0.90 = {TGT:.2f} kW\n")
 
     rows = []
     for label, fl, th in STAGES:
         res = simulate(sim, pred, fl, thr_full if th == 'full' else thr_train, TGT)
-        rows.append({'단계': label, **evaluate(sim, res)})
-    rows.append({'단계': 'Rule-Based', **evaluate(sim, _rule_based(sim))})
+        rows.append({'단계': label, **metrics9(evaluate_all(res, baseline))})
+    rows.append({'단계': 'Rule-Based', **metrics9(evaluate_all(_rule_based(sim), baseline))})
     out = pd.DataFrame(rows)
     os.makedirs(RESULTS, exist_ok=True)
     p11 = os.path.join(RESULTS, 'table_2_11_stages.csv')
@@ -142,10 +146,10 @@ def main():
     F = dict(ga=1, na=1, da=1, ra=1, ba=1)
     krows = []
     for kappa in (0.85, 0.90, 0.95):
-        m = evaluate(sim, simulate(sim, pred, F, thr_train, P_CAP * kappa))
+        e = evaluate_all(simulate(sim, pred, F, thr_train, P_CAP * kappa), baseline)['economic']
         krows.append({'κ': kappa, 'P_tgt(kW)': round(P_CAP * kappa, 2),
-                      '요금절감률(%)': m['요금절감률(%)'], '요금적용전력(kW)': m['요금적용전력(kW)'],
-                      '기본요금증감(원)': m['기본요금증감(원)'], '순절감액(원)': m['순절감액(원)'],
+                      '요금절감률(%)': e['cost_saving_rate_pct'], '요금적용전력(kW)': e['peak_demand_kw'],
+                      '기본요금증감(원)': e['base_charge_delta_won'], '순절감액(원)': e['net_saving_won'],
                       '채택': '기준' if kappa == 0.90 else ''})
     kdf = pd.DataFrame(krows)
     p15 = os.path.join(RESULTS, 'table_2_15_kappa.csv')
