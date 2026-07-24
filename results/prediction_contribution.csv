@@ -1,0 +1,6 @@
+﻿prediction_source,pred_mae_test_kw,pred_nmae_test_pct,energy_cost_saving_won,billing_demand_kw,peak_reduction_pct,base_charge_delta_won,net_saving_won,net_saving_rate_pct
+no_pred,44.977,100.0,327477.0,69.75,2.08,-132716.0,460192.0,1.03
+persistence,5.056,11.24,341336.0,69.15,2.93,-186875.0,528211.0,1.18
+LSTM,1.29,2.87,331022.0,70.48,1.05,-67259.0,398281.0,0.89
+GRU,1.306,2.9,333184.0,70.48,1.05,-67259.0,400442.0,0.9
+perfect,0.0,0.0,344895.0,70.48,1.05,-67259.0,412154.0,0.92

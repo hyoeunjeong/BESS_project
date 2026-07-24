@@ -15,9 +15,17 @@ __pycache__/
 *.pyc
 venv/
 data/
-data/
-data/
 
 _archive/
 
 _backup_paper_migration/
+
+# ── 논문 산출물은 GitHub 에 포함 (스냅샷 공유용, 재생성도 가능) ──
+!figures/
+!figures/*.png
+!/results/
+/results/*
+!/results/table_2_11_stages.csv
+!/results/table_2_12_reasons.csv
+!/results/table_2_15_kappa.csv
+!/results/prediction_contribution.csv
