@@ -36,6 +36,7 @@ class RuleBasedBESSController:
         bess_power = 0.0
         action     = 'idle'
         blocked    = None
+        reason     = 'none'   # [§6-1] 제어 사유 관측
 
         # ── Rule 1: 태양광 잉여 → 충전 
         if net_load < 0:
@@ -47,6 +48,7 @@ class RuleBasedBESSController:
                 charge_pw  = min(surplus, self.max_power, max_chargeable)
                 bess_power = -charge_pw
                 action     = 'charge'
+                reason     = 'solar_surplus'
             else:
                 blocked = 'overcharge'
 
@@ -64,6 +66,7 @@ class RuleBasedBESSController:
             if max_dischargeable > 0 and discharge_pw > 0:
                 bess_power = min(discharge_pw, max_dischargeable)
                 action     = 'discharge'
+                reason     = 'peak_discharge'
             elif discharge_pw > 0:
                 blocked = 'overdischarge'
 
@@ -76,6 +79,7 @@ class RuleBasedBESSController:
             if charge_pw > 0:
                 bess_power = -charge_pw
                 action     = 'charge'
+                reason     = 'offpeak_grid_charge'
 
         # ── SOC 업데이트 
         self._update_soc(bess_power, time_step)
@@ -90,6 +94,7 @@ class RuleBasedBESSController:
             'soc'           : self.soc,
             'action'        : action,
             'blocked'       : blocked,
+            'reason'        : reason,
             'tariff_period' : tariff_period,
         }
 

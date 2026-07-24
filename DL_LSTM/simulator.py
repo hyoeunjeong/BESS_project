@@ -54,6 +54,7 @@ def run_lstm_simulation(merged_df      : pd.DataFrame,
             'grid_power_kw'        : res['grid_power_kw'],
             'soc'                  : res['soc'],
             'action'               : res['action'],
+            'reason'               : res['reason'],   # [§6-1] 제어 사유 관측
         })
 
     df = pd.DataFrame(records)

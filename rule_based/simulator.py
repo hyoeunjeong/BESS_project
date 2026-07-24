@@ -49,6 +49,7 @@ def run_simulation(merged: pd.DataFrame,
             'soc'           : res['soc'],
             'action'        : res['action'],
             'blocked'       : res['blocked'],
+            'reason'        : res['reason'],   # [§6-1] 제어 사유 관측
         })
 
     df = pd.DataFrame(records)
