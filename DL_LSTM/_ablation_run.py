@@ -31,7 +31,7 @@ from evaluator import evaluate_all, calc_prediction_metrics
 REPO    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS = os.path.join(REPO, 'results')
 OUT     = os.path.join(RESULTS, 'prediction_contribution.csv')
-GRU_NPY = os.path.join(RESULTS, '_pred_gru.npy')
+GRU_NPY = os.path.join(RESULTS, 'pred_gru.npy')
 
 
 def main():

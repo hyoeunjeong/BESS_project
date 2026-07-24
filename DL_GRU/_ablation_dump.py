@@ -13,7 +13,7 @@ from data_loader import load_data, make_sequences, inverse_target, load_scaler
 from models.gru_model import predict, load_model
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT  = os.path.join(REPO, 'results', '_pred_gru.npy')
+OUT  = os.path.join(REPO, 'results', 'pred_gru.npy')
 
 
 def main():
