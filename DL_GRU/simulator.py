@@ -19,6 +19,13 @@ def run_gru_simulation(merged_df      : pd.DataFrame,
     n_train = int(len(test_df) * config.TRAIN_RATIO)
     controller.set_peak_threshold(test_df['load_kw'].values[:n_train])
 
+    # [§4] 수요전력 상한(P_CAP) = 학습 구간 무제어 요금적용전력(중간·최대부하 순부하 최대)
+    if hasattr(controller, 'set_demand_cap'):
+        _tr = test_df.iloc[:n_train]
+        _pmask = _tr['tariff_period'].isin(['mid_peak', 'on_peak'])
+        _pnet = (_tr['load_kw'] - _tr['solar_kw']).clip(lower=0)
+        controller.set_demand_cap(float(_pnet[_pmask].max()) if bool(_pmask.any()) else None)
+
     records = []
     for i, (_, row) in enumerate(test_df.iterrows()):
         if i >= len(predicted_nl):

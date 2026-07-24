@@ -46,6 +46,18 @@ class GRUBESSController:
         self.soc = soc_initial
         self.energy = capacity_kwh * soc_initial
         self.peak_threshold = None
+        self.demand_target = None   # [§4] 요금적용전력 상한 목표
+
+    def set_demand_cap(self, p_cap: float):
+        """[§4] 요금적용전력 상한 목표 설정.
+        target = P_CAP(학습구간 무제어 요금적용전력) × DEMAND_SHAVE."""
+        shave = getattr(config, 'DEMAND_SHAVE', 0.90)
+        if p_cap is None or p_cap == float('inf'):
+            self.demand_target = None
+        else:
+            self.demand_target = p_cap * shave
+            print(f"[GRU 제어기] 수요전력 상한: P_CAP {p_cap:.2f} × {shave} = {self.demand_target:.2f} kW")
+        return self.demand_target
 
     def set_peak_threshold(self, train_load_kw_array: np.ndarray):
         """
@@ -84,16 +96,33 @@ class GRUBESSController:
         actual_net_load = max(0.0, actual_load_kw - actual_solar_kw)
         actual_surplus = max(0.0, actual_solar_kw - actual_load_kw)
 
+        # [§4] 요금적용전력(중간·최대부하 시간대)만 상한 관리 대상
+        peak_hr = tariff in ('mid_peak', 'on_peak')
+        cap = self.demand_target if (peak_hr and self.demand_target is not None) else None
+        headroom = max(0.0, cap - actual_net_load) if cap is not None else float('inf')
+
         bess_pwr = 0.0
         action = 'idle'
         reason = 'none'
 
         # -------------------------------------------------------------
-        # P0: 비상 보호 (최우선)
+        # [§4] 수요전력 초과 방지 방전 (최우선) — 요금적용전력 상한 관리
         # -------------------------------------------------------------
-        if self.soc < self.soc_min + self.EMERGENCY_LOW:
+        if cap is not None and actual_net_load > cap and self.soc > self.soc_min:
+            max_d = self._max_discharge(time_step)
+            dis = min(actual_net_load - cap, self.max_power, max_d, actual_net_load)
+            if dis > 0:
+                bess_pwr = dis
+                action = 'discharge'
+                reason = 'demand_charge_cut'
+
+        # -------------------------------------------------------------
+        # P0: 비상 보호
+        # -------------------------------------------------------------
+        elif self.soc < self.soc_min + self.EMERGENCY_LOW:
             max_c = self._max_charge(time_step)
-            charge_pw = min(self.max_power * 0.5, max_c)
+            # [§4] 비상충전도 요금적용전력을 밀어올리지 않도록 headroom 제약
+            charge_pw = min(self.max_power * 0.5, max_c, headroom)
             if charge_pw > 0:
                 bess_pwr = -charge_pw
                 action = 'charge'
