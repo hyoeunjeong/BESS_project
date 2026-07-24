@@ -162,12 +162,21 @@ def build_shared_baseline(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def prediction_metrics(df: pd.DataFrame):
-    """[정정 3] 학습 타깃과 동일하게 0 하한 클리핑을 적용"""
+    """[정정 3] 학습 타깃과 동일하게 0 하한 클리핑을 적용
+    [§3-3] 논문 표 예측 지표는 test 구간(뒤 15%)을 헤드라인으로 쓴다.
+           full 구간 값은 mae_full_kw 등으로 참고 보존."""
     if 'predicted_net_load_kw' not in df.columns:
         return None
     y_true = np.clip(df['load_kw'].values - df['solar_kw'].values, 0, None)
     y_pred = df['predicted_net_load_kw'].values
-    return calc_prediction_metrics(y_true, y_pred)
+    n  = len(y_true)
+    t2 = int(n * (config.TRAIN_RATIO + config.VAL_RATIO))
+    test = calc_prediction_metrics(y_true[t2:], y_pred[t2:])   # §3-3 논문 표
+    full = calc_prediction_metrics(y_true, y_pred)             # 참고
+    test['mae_full_kw']  = full['mae_kw']
+    test['rmse_full_kw'] = full['rmse_kw']
+    test['nmae_full_pct'] = full['nmae_pct']
+    return test
 
 
 # =====================================================================
@@ -246,7 +255,7 @@ def print_table(metrics: dict):
 
     # 예측 성능
     if any('prediction' in metrics[n] for n in names):
-        print(f"\n  [예측 성능 — 학습 타깃(0 하한 클리핑) 기준]")
+        print(f"\n  [예측 성능 — test 구간(뒤 15%), 학습 타깃(0 하한 클리핑) 기준]")
         for k, lab, fmt in (('mae_kw', 'MAE (kW)', '{:.3f}'),
                             ('rmse_kw', 'RMSE (kW)', '{:.3f}'),
                             ('nmae_pct', '상대 오차 (%)', '{:.2f}')):

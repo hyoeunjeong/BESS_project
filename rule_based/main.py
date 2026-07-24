@@ -74,9 +74,11 @@ def main():
     output_dir = config.RESULT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
-    result_df.to_csv(f'{output_dir}/simulation_result.csv',
+    # [§7] 결과 파일명을 compare.py·web_dashboard 가 읽는 rb_simulation_result.csv 로 통일.
+    #   (이전엔 simulation_result.csv 로 저장 → compare 가 stale rb_ 파일을 읽던 버그)
+    result_df.to_csv(f'{output_dir}/rb_simulation_result.csv',
                      index=False, encoding='utf-8-sig')
-    print(f"   - 결과 CSV: {output_dir}/simulation_result.csv")
+    print(f"   - 결과 CSV: {output_dir}/rb_simulation_result.csv")
 
     # 극단 사례
     print("\n   극단 사례 자동 선정 중...")
