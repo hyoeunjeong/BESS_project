@@ -58,20 +58,25 @@ def fig_2_3(base):
     sim = base.iloc[SEQ:].reset_index(drop=True)
     true = sim['net_load_kw'].values
     ts = sim['timestamp']
-    # 일평균 부하 최고 주간의 7일
-    d0 = 24 * 200
+    # [B-1] 테스트 구간(뒤 15%) 시작에서 7일
+    d0 = int(len(sim) * 0.85)
     sl = slice(d0, d0 + 24 * 7)
+    day0 = pd.Timestamp(ts.iloc[d0]).date()
+    day1 = pd.Timestamp(ts.iloc[d0 + 24 * 7 - 1]).date()
+    resid = pred[sl] - true[sl]
+    within5 = float((np.abs(resid) <= 5).mean() * 100)
     fig, ax = plt.subplots(2, 1, figsize=(11, 6), sharex=True,
                            gridspec_kw={'height_ratios': [3, 1]})
     ax[0].plot(ts[sl], true[sl], color='#333', lw=1.6, label='실측 순부하')
     ax[0].plot(ts[sl], pred[sl], color=COLORS['LSTM'], lw=1.4, ls='--', label='LSTM 예측')
     ax[0].set_ylabel('순부하 (kW)'); ax[0].legend(loc='upper right'); ax[0].grid(alpha=.3)
-    ax[0].set_title('그림 2.3  LSTM 순부하 예측 결과 및 잔차 (대표 7일)')
-    resid = pred[sl] - true[sl]
+    ax[0].set_title(f'그림 2.3  LSTM 순부하 예측 결과 및 잔차 (테스트 구간 {day0} ~ {day1})')
     ax[1].bar(ts[sl], resid, width=0.03, color='#c1121f', alpha=.7)
     ax[1].axhline(0, color='#333', lw=.8)
+    ax[1].axhline(5, color='#457b9d', lw=.8, ls=':'); ax[1].axhline(-5, color='#457b9d', lw=.8, ls=':')
     ax[1].set_ylabel('잔차 (kW)'); ax[1].grid(alpha=.3)
     _save(fig, 'fig_2_03.png')
+    print(f"[fig 2.3] 구간 {day0}~{day1}, 잔차 ±5kW 이내 비율 {within5:.1f}%")
 
 
 # ── 2.4 세 방식 성능 비교 (막대) ─────────────────────────────────
@@ -209,14 +214,18 @@ def fig_2_8_2_9(res, day):
 
 
 # ── 2.10 SOC 추세 비교 (7일, 3궤적) ─────────────────────────────
-def fig_2_10(res):
+def fig_2_10(res, day):
+    # [B-4] 2.8·2.9 와 같은 주간(피크일부터 7일)
+    d0 = pd.Timestamp(day); d1 = d0 + pd.Timedelta(days=7)
     fig, ax = plt.subplots(figsize=(11, 4.8))
     for n in ['Rule-Based', 'LSTM', 'GRU']:
-        d = res[n].iloc[24 * 200: 24 * 207]
-        ax.plot(d['timestamp'], d['soc'] * 100, color=COLORS[n], lw=1.5, label=n)
-    ax.axhspan(20, 80, color='#2a9d8f', alpha=.08, label='권장 20~80%')
-    ax.set_ylabel('SOC (%)'); ax.set_ylim(0, 100); ax.grid(alpha=.3); ax.legend()
-    ax.set_title('그림 2.10  SOC 추세 비교 (대표 7일)')
+        d = res[n]
+        w = d[(d['timestamp'] >= d0) & (d['timestamp'] < d1)]
+        ax.plot(w['timestamp'], w['soc'] * 100, color=COLORS[n], lw=1.5, label=n)
+    ax.axhspan(20, 80, color='#2a9d8f', alpha=.10, label='권장 20~80%')
+    ax.axhline(10, color='#c1121f', lw=.6, ls=':'); ax.axhline(90, color='#c1121f', lw=.6, ls=':')
+    ax.set_ylabel('SOC (%)'); ax.set_ylim(0, 100); ax.grid(alpha=.3); ax.legend(loc='upper right')
+    ax.set_title(f'그림 2.10  SOC 추세 비교 ({day} 부터 7일)')
     _save(fig, 'fig_2_10.png')
 
 
@@ -283,7 +292,7 @@ def main():
     fig_2_7()
     day = _peak_day(base)
     fig_2_8_2_9(res, day)
-    fig_2_10(res)
+    fig_2_10(res, day)
     fig_2_11(res)
     fig_2_12()
     print("완료 — figures/ (2.1 시스템구성·2.2 게이트구조는 개념도로 별도 유지)")
