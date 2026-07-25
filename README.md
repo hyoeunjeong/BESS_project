@@ -240,10 +240,11 @@ is_weekend                                                  # 주말/공휴일 �
 ## 8. 프로젝트 구조
 
 ```
-Bess_Project/
+BESS_project/
 ├── compare.py                  # 세 방식 동일 구간 비교(교집합 정렬 + 공유 baseline)
 ├── make_tables.py              # 논문 표 2.11/2.12/2.15 일괄 생성
 ├── make_figures.py             # 논문 그림 2.3~2.12 일괄 생성 (300dpi)
+├── stats_test.py               # 5시드 통계(평균±σ·Welch t/p)
 ├── README.md
 │
 ├── rule_based/                 # 규칙 기반 제어
@@ -255,12 +256,15 @@ Bess_Project/
 │   ├── simulator.py            #   시뮬레이션 루프
 │   ├── evaluator.py            #   성능 지표 계산
 │   ├── visualizer.py           #   그래프
+│   ├── solar_model.py          #   태양광 발전 추정
+│   ├── requirements.txt        #   의존성
 │   └── verify_reproduction.py  #   정본 13개 지표 재현 검증(Acceptance Test)
 │
 ├── DL_LSTM/                     # LSTM 예측 기반 (rule_based 구성 +)
 │   ├── main.py                 #   SKIP_TRAINING / FULL_YEAR 옵션
 │   ├── bess_controller.py      #   P0~P3 + 수요전력 관리 계층
 │   ├── models/lstm_model.py    #   LSTM 예측 모델 + set_seed
+│   ├── solar_estimator.py      #   태양광 발전 추정
 │   ├── _build_base_data.py     #   공통 입력(base_data.csv, pred_lstm.npy) 생성
 │   ├── stage_run.py            #   표 2.11/2.15 정정 단계별·κ 민감도 시뮬
 │   ├── _ablation_run.py        #   예측 기여도 ablation 러너
