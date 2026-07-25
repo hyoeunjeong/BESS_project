@@ -310,6 +310,41 @@ pip install -r web_dashboard/requirements_web.txt   # 대시보드 (선택)
 COMMON_API_KEY=발급받은_인증키
 ```
 
+> `.env`·API 키는 **재생성이 아니라 최초 수집용**이다. 아래 재현 패키지가 저장소에 포함되어 있어
+> 네트워크·인증키 없이 논문 수치를 재현할 수 있다.
+
+### 9.0 재현 패키지 (저장소 단독 재현)
+
+논문 재현에 필요한 입력 데이터·모델을 저장소에 포함한다(합계 ~3.7MB). 대용량 캐시를 통째로 올리지 않고
+`.gitignore` 예외로 **필요한 파일만** 연다.
+
+| 파일 | 용도 | 대안 |
+|---|---|---|
+| `rule_based/data/api_cache/kma_st108_*.csv` | **일사량 실측(태양광)** | **없음** — 합성 태양광은 `STRICT_DATA`가 차단(논문과 다름) |
+| `rule_based/data/api_cache/{load,smp_육지}_*.csv` | 부하·SMP 캐시 | 아래 CSV |
+| `rule_based/data/{load_data.csv, smp_data.csv}` | RB 자립 CSV 경로 | — |
+| `DL_{LSTM,GRU}/data/cache/{load_all_all,smp_2025-*}.csv` | DL 실측 입력 캐시 | — |
+| `DL_{LSTM,GRU}/models/saved/{lstm_best,gru_best}.pt`, `scaler.pkl` | 예측 모델·정규화 | 시드 42 재학습(`SKIP_TRAINING=False`) |
+
+**재현 절차** (네트워크 불필요):
+
+```bash
+# 0) 고정 설정: STRICT_DATA=True, TARIFF_MODE='seasonal', (DL) SKIP_TRAINING=True, FULL_YEAR=True
+# 1) 세 방식 시뮬레이션 (캐시 자동 사용)
+cd rule_based && python main.py   && cd ..     # → rb_simulation_result.csv (8,760)
+cd DL_LSTM    && python main.py   && cd ..     # → lstm_simulation_result.csv (8,736)
+cd DL_GRU     && python main.py   && cd ..     # → gru_simulation_result.csv (8,736)
+# 2) 표·그림
+python compare.py                              # 표2.8·2.9 (3자 정렬 8,736)
+python make_table_2_13.py                      # 표2.13 (계절별, 검산 assert 포함)
+python make_figures.py                         # 그림 2.3~2.12 (align_frames 정렬)
+# 3) 규칙 기반 정본 검증
+cd rule_based && python verify_reproduction.py # 8,736 정렬 13지표
+```
+
+- **RB는 완전 자립**: `USE_SMP_API=False`(smp_data.csv)+`USE_LOAD_API=False`(load_data.csv)+kma 캐시로 재현(표2.8 RB·표2.13 RB는 SMP 무관, 순절감 0원 차 검증됨).
+- **DL은 kma 캐시 필수**: `DATA_SOURCE='csv'` 경로는 합성 태양광을 쓰므로 논문과 달라지고 `STRICT_DATA`가 차단한다. DL은 위 실측 캐시로만 재현한다.
+
 ### 9.2 각 방식 시뮬레이션
 
 ```bash
@@ -372,7 +407,7 @@ cd rule_based && python verify_reproduction.py    # 규칙 기반 13개 지표
 python compare.py                                 # LSTM/GRU 예측·경제 지표 3자 대조
 ```
 
-- **종료 코드 0** = 통과 (`seasonal`, **1년 8,760 전 구간**, 규칙 기반 핵심 13지표 일치)
+- **종료 코드 0** = 통과 (`seasonal`, **3자 공통창 8,736시점**, 규칙 기반 핵심 13지표 일치)
 - 설정(`TARIFF_MODE='seasonal'` · 계약전력 100 kW · 기본요금 7,470원/kW) · 시간대(최대부하 1,476h) ·
   핵심 지표(순절감 281,362원 · 요금적용전력 71.24 kW · 사이클 243.62 · SOC 체류 15.74%)를 사전 점검 후 대조
 - LSTM/GRU 예측 지표(test MAE 시드 42 1.290 / 1.306)와 경제 지표는 `compare.py` 가 재생성
