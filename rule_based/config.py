@@ -59,6 +59,9 @@ PAPER_MID_PEAK_HOURS = {9, 12, 17, 18, 19, 20, 21, 22}
 PAPER_TARIFF = {'off_peak': 60.0, 'mid_peak': 110.0, 'on_peak': 180.0}
 
 # 계절별 단가 (원/kWh) — seasonal·2026 공용
+#   [주의] TARIFF_MODE='2026' 은 시간대(_BANDS_2026)만 바꾸고 단가는 아래 2025년 값을
+#          재사용한다. 실제 2026 개편의 단가 조정은 미반영이며, 시간대 이동 효과만
+#          분리 관찰하기 위한 설계다. README §11.3 경고 블록 참조.
 SEASONAL_TARIFF = {
     'summer': {'off_peak': 90.8, 'mid_peak': 116.6, 'on_peak': 150.1},
     'spring': {'off_peak': 90.8, 'mid_peak':  95.6, 'on_peak': 114.8},
