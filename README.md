@@ -6,7 +6,7 @@
 
 한국전력거래소(SMP)·공공데이터포털(부하)·기상청(일사량)의 **2025년 실측 1년치(8,760시간)** 데이터를 사용하며,
 **LSTM·GRU는 동일한 데이터·동일한 제어 로직** 을 쓰고 예측기만 다르며, **규칙 기반은 예측 없이 동작하는 별도의 제어 정책** 으로서 비교 기준(baseline) 역할을 합니다.
-모든 결과 수치는 저장소 코드(`compare.py`, `verify_reproduction.py`)로 **그대로 재생성** 됩니다.
+결과 수치는 저장소 코드로 재생성됩니다 — 담당 스크립트는 §10 표를 참조하세요.
 
 ---
 
@@ -363,6 +363,18 @@ python compare.py                                 # LSTM/GRU 예측·경제 지�
 > **평가 구간 주의** — 본 절(`verify_reproduction.py`)은 **8,760 전 구간**, §11 결과표(`compare.py`)는
 > 시퀀스 24 소모 후 **8,736 정렬 구간**을 쓴다. 같은 파이프라인이지만 구간이 달라 규칙 기반 값이 미세하게 다르다:
 > 순절감 281,362원(8,760) / 285,497원(8,736), 사이클 243.62 / 243.4, SOC 체류 15.74% / 15.77%.
+
+### 10.1 수치별 재현 스크립트
+
+| README 위치 | 수치 | 재현 스크립트 |
+|---|---|---|
+| §11.1 경제·에너지·안정성 | 3자 비교 전 항목 | `python compare.py` |
+| §10 정본 13지표 | 순절감 281,362원 등 | `cd rule_based && python verify_reproduction.py` |
+| §11.1 5시드 평균±σ | 1.203±0.066 / 1.283±0.142 | `cd DL_LSTM && python seed_sweep.py` (GRU 는 `DL_GRU`) |
+| §11.2 Welch t-검정 | t = −1.14, p = 0.299 | `python stats_test.py` (`results/seed_sweep_*.csv` → 평균±σ·CV·Welch t/p) |
+| §11.4 ablation | 순절감 역전 | `cd DL_GRU && python _ablation_dump.py` → `cd ../DL_LSTM && python _ablation_run.py` |
+| 표 2.11/2.12/2.15 | 단계별·계층별·κ | `python make_tables.py` |
+| 그림 2.3~2.12 | — | `python make_figures.py` |
 
 ---
 
