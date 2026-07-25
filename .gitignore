@@ -27,3 +27,4 @@ _backup_paper_migration/
 /results/*
 !/results/*.csv          # 표·seed_sweep·base_data 등 논문 근거 CSV 전부
 # (대용량 중간 바이너리 *.npy 는 계속 제외)
+thesis.docx

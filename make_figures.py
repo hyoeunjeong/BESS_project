@@ -13,6 +13,7 @@
 import os
 import numpy as np
 import pandas as pd
+import compare                       # [감사] align_frames 재사용(그림 정렬)
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -49,6 +50,19 @@ def load_all():
     base = pd.read_csv(os.path.join(RESULTS, 'base_data.csv'), parse_dates=['timestamp'])
     res = {n: pd.read_csv(p, parse_dates=['timestamp']) for n, p in RESULT_CSV.items()
            if os.path.exists(p)}
+    # [감사] 세대 오독 방지 — 2026-07 감사에서 8,372행 구세대 파일 6개가 교차 폴더에
+    #        존재했다. 정본은 RB 8,760 / LSTM·GRU 8,736. 벗어나면 즉시 멈춘다.
+    _expect = {'Rule-Based': 8760, 'LSTM': 8736, 'GRU': 8736}
+    for n, df in res.items():
+        assert len(df) == _expect[n], \
+            f'{n}: 행수 {len(df)} (정본 {_expect[n]}). 구세대(8,372) 파일 의심 — 중단.'
+    # [정렬] RB/LSTM/GRU 를 함께 쓰는 그림(fig_2_6·fig_2_11 등)의 공정성을 위해
+    #        compare.align_frames 로 8,736 공통창에 정렬한다. RB 단독은 1/1(첫 24시)을
+    #        포함해 비교가 어긋나므로(표2.8·표2.13과 동일 기준) 반드시 정렬한다.
+    if set(res) == set(RESULT_CSV):
+        res = compare.align_frames(res)
+        for n, df in res.items():
+            assert len(df) == 8736, f'{n}: 정렬 후 {len(df)}행 (기대 8,736) — 중단.'
     return base, res
 
 

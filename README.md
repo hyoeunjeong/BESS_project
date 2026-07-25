@@ -282,6 +282,14 @@ BESS_project/
 > 논문 표·그림·근거 CSV(`results/*.csv`, `figures/*.png`)는 **저장소에 포함**된다. 대용량 중간 산출물
 > (`results/*.npy`, 각 `*/results/` 시뮬 CSV)과 `comparison_results/`는 `.gitignore` 대상이며, 모두 위 스크립트로 재생성된다.
 
+### 폐기된 결과 세대 (삭제됨)
+
+`lstm_result_final.csv` / `gru_result_final.csv` 는 2026-07 감사에서 폐기 확인 후 삭제되었다.
+식별 지문: **8,371행**(=364일×23시간−1), **hour 0 전량 누락**, **smp 고유값 16개**(연중 동일 16값
+분포가 매월 반복되어 월평균이 전부 109.85원 — 가짜 SMP), **reason 컬럼 없음**, **14열**.
+`STRICT_DATA` 도입(commit 3841a1a) 이전 세대이며, 논문의 어떤 수치도 이 파일에서 산출되지 않았다.
+논문 근거는 `*_simulation_result.csv`(**8,736행 · 실측 SMP 4,120 고유**)이다.
+
 ---
 
 ## 9. 설치와 실행

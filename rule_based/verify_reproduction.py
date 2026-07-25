@@ -27,24 +27,32 @@ import simulator
 import evaluator
 
 
-# ── 정본 기댓값 (seasonal, 1년 전체 8,760시점) ───────────────────
-#   README §10 및 compare.py 와 동일한 파이프라인으로 재생성되는 값.
+# ── 정본 기댓값 (seasonal, 3자 공통창 8,736시점) ──────────────────
+#   [정렬] 논문 표2.8 및 compare.py 는 Rule-Based/LSTM/GRU 세 결과를
+#   timestamp 교집합(8,736시점)으로 정렬해 비교한다. LSTM/GRU 는 입력
+#   시퀀스 24시간을 소모하므로 첫 24시각이 없고, 교집합은 RB[24:] 가 된다.
+#   따라서 본 검증도 같은 8,736 창으로 맞춰 표2.8 값을 그대로 대조한다.
+#   (참고: RB 단독 8,760시점 값은 순절감 281,362원 / 사이클 243.62 /
+#          SOC 체류 15.74% 이며, 정렬 전 값이므로 표2.8과 다르다.)
 #   숫자를 지어내지 않는다 — 코드가 재현 못 하면 여기 값을 바꾸지 말고 원인을 규명한다.
 EXPECTED_RB = {
-    'n_rows'                 : 8760,
+    'n_rows'                 : 8736,
     'on_peak_hours'          : 1476,     # 최대부하(주말·공휴일 반영)
     'mid_peak_hours'         : 2696,
-    'off_peak_hours'         : 4588,
-    'cost_saving_rate_pct'   : 0.73,
-    'cost_saving_won'        : 281362,
-    'net_saving_won'         : 281362,
+    'off_peak_hours'         : 4564,
+    'cost_saving_rate_pct'   : 0.747,
+    'cost_saving_won'        : 285497,
+    'net_saving_won'         : 285497,
     'peak_demand_kw'         : 71.24,    # 요금적용전력(중간·최대부하)
     'baseline_peak_demand_kw': 71.24,
     'base_charge_delta_won'  : 0,        # 규칙기반은 요금적용전력을 못 낮춤
-    'cycle_count'            : 243.62,
-    'soc_in_band_rate_pct'   : 15.74,
+    'cycle_count'            : 243.4,
+    'soc_in_band_rate_pct'   : 15.77,
     'prevention_rate_pct'    : 100.0,    # 과충·방전 0
 }
+
+# 3자 공통창 정렬 시 소모되는 선행 시각 수(LSTM/GRU 입력 시퀀스 길이).
+_SEQ_LEN = 24
 
 # 상대 허용 오차 (기본 1.5%), 정수 카운트는 절대 오차 0
 REL_TOL = 0.015
@@ -87,10 +95,17 @@ def run_pipeline():
     )
     result   = simulator.run_simulation(merged)
     baseline = simulator.run_baseline_simulation(merged)
+    # [정렬] 표2.8(compare.align_frames)과 동일한 8,736 공통창으로 맞춘다.
+    #   RB 단독은 8,760시점이나 LSTM/GRU 는 seq_len=24 소모로 첫 24시각이
+    #   없어 교집합이 RB[24:] 가 된다. 같은 창을 잘라 표2.8 값을 재현한다.
+    #   (연속 시뮬레이션 결과를 사후에 슬라이싱한 것으로, compare.align_frames
+    #    와 동일한 방식이다.)
+    result   = result.iloc[_SEQ_LEN:].reset_index(drop=True)
+    baseline = baseline.iloc[_SEQ_LEN:].reset_index(drop=True)
     m = evaluator.evaluate_all(result, baseline)
     e, st = m['economic'], m['stability']
     return {
-        'n_rows'                 : len(merged),
+        'n_rows'                 : len(result),
         'on_peak_hours'          : int((result['tariff_period'] == 'on_peak').sum()),
         'mid_peak_hours'         : int((result['tariff_period'] == 'mid_peak').sum()),
         'off_peak_hours'         : int((result['tariff_period'] == 'off_peak').sum()),
@@ -107,7 +122,7 @@ def run_pipeline():
 
 
 def compare(actual, expected):
-    print(f"\n{'='*66}\n  규칙 기반 정본 재현 (seasonal, 1년 8,760시점)\n{'='*66}")
+    print(f"\n{'='*66}\n  규칙 기반 정본 재현 (seasonal, 3자 공통창 8,736시점)\n{'='*66}")
     print(f"  {'지표':<26}{'정본':>14}{'재현':>14}{'판정':>7}")
     print("  " + "-" * 60)
     fails = []

@@ -64,6 +64,12 @@ def load_results() -> dict:
             continue
         df = pd.read_csv(path, parse_dates=['timestamp'])
         df = df.drop_duplicates('timestamp').sort_values('timestamp').reset_index(drop=True)
+        # [감사] 세대 오독 방지 — 2026-07 감사에서 8,372행 구세대 파일 6개가 교차
+        #        폴더에 동일 파일명으로 존재했다. 정본은 RB 8,760 / LSTM·GRU 8,736.
+        _expect = {'Rule-Based': 8760, 'LSTM': 8736, 'GRU': 8736}.get(name)
+        if _expect is not None:
+            assert len(df) == _expect, \
+                f'{name}: 행수 {len(df)} (정본 {_expect}). 구세대(8,372) 파일 의심 — 중단.'
         frames[name] = df
         print(f"  [로드] {name:12s} {len(df):>6,}행  "
               f"{df['timestamp'].min().date()} ~ {df['timestamp'].max().date()}")
