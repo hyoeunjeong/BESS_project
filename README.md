@@ -334,11 +334,15 @@ COMMON_API_KEY=발급받은_인증키
 cd rule_based && python main.py   && cd ..     # → rb_simulation_result.csv (8,760)
 cd DL_LSTM    && python main.py   && cd ..     # → lstm_simulation_result.csv (8,736)
 cd DL_GRU     && python main.py   && cd ..     # → gru_simulation_result.csv (8,736)
-# 2) 표·그림
+# 2) 표
 python compare.py                              # 표2.8·2.9 (3자 정렬 8,736)
 python make_table_2_13.py                      # 표2.13 (계절별, 검산 assert 포함)
+# 3) 그림용 공통 입력(pred_*.npy) 빌드 → 그림
+#    (base_data.csv·표 CSV는 저장소에 포함되나, 중간 바이너리 pred_*.npy 는 재생성 대상)
+cd DL_LSTM && python _build_base_data.py && cd ..   # results/base_data.csv, pred_lstm.npy
+cd DL_GRU  && python _ablation_dump.py  && cd ..     # results/pred_gru.npy
 python make_figures.py                         # 그림 2.3~2.12 (align_frames 정렬)
-# 3) 규칙 기반 정본 검증
+# 4) 규칙 기반 정본 검증
 cd rule_based && python verify_reproduction.py # 8,736 정렬 13지표
 ```
 
