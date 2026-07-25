@@ -287,8 +287,12 @@ BESS_project/
 
 ### 9.1 환경 (Python 3.12)
 
+모듈별 `requirements.txt` 를 사용한다.
+
 ```bash
-pip install numpy pandas matplotlib scikit-learn torch requests python-dotenv flask flask-socketio
+pip install -r rule_based/requirements.txt          # 규칙 기반
+pip install -r DL_LSTM/requirements.txt             # 예측 기반 (torch·scipy 포함, DL_GRU 동일)
+pip install -r web_dashboard/requirements_web.txt   # 대시보드 (선택)
 ```
 
 프로젝트 루트에 `.env` 생성 (공공데이터포털 인증키):
