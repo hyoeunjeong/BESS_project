@@ -29,27 +29,9 @@ _backup_paper_migration/
 # (대용량 중간 바이너리 *.npy 는 계속 제외)
 thesis.docx
 
-# ── 재현 패키지 (심사 #9: 저장소 단독 재현) — 부모 디렉터리부터 단계적 해제 ──
-# 일사량 실측 캐시(대안 없음)·RB CSV·DL 캐시·모델·스케일러. 합계 ~3.7MB.
-!rule_based/data/
-!rule_based/data/load_data.csv
-!rule_based/data/smp_data.csv
-!rule_based/data/api_cache/
-!rule_based/data/api_cache/kma_st108_20250101_20251231.csv
-!rule_based/data/api_cache/load_20250101_20251231.csv
-!rule_based/data/api_cache/smp_육지_20250101_20251231.csv
-!DL_LSTM/data/
-DL_LSTM/data/*
-!DL_LSTM/data/cache/
-DL_LSTM/data/cache/*
-!DL_LSTM/data/cache/load_all_all.csv
-!DL_LSTM/data/cache/smp_2025-01-01_2025-12-31.csv
-!DL_GRU/data/
-DL_GRU/data/*
-!DL_GRU/data/cache/
-DL_GRU/data/cache/*
-!DL_GRU/data/cache/load_all_all.csv
-!DL_GRU/data/cache/smp_2025-01-01_2025-12-31.csv
+# ── 재현 패키지 (모델·스케일러만 포함) ──
+# [보안] KPX/ASOS 원자료(캐시·smp_data.csv·load_data.csv)는 저장소에 올리지 않는다.
+#        데이터는 공공 API(.env 키)로 각자 수집한다. 학습된 모델·스케일러만 동봉한다.
 !DL_LSTM/models/
 !DL_LSTM/models/saved/
 DL_LSTM/models/saved/*
