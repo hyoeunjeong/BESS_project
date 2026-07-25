@@ -14,11 +14,11 @@ import numpy as np
 # 경로 설정
 import os
 
-PROJECT_ROOT = Path(__file__).parent.absolute()
+APP_DIR = Path(__file__).parent.absolute()
 
 possible_paths = [
-    PROJECT_ROOT / 'DL_LSTM' / 'results',
-    PROJECT_ROOT / 'results',
+    APP_DIR / 'DL_LSTM' / 'results',
+    APP_DIR / 'results',
 ]
 
 DATA_DIR = None
@@ -29,21 +29,21 @@ for p in possible_paths:
         break
 
 if DATA_DIR is None:
-    DATA_DIR = PROJECT_ROOT / 'DL_LSTM' / 'results'
+    DATA_DIR = APP_DIR / 'DL_LSTM' / 'results'
     print(f"[경로 경고] 폴더를 찾을 수 없음. 기본값 사용: {DATA_DIR}")
 
 CSV_PATH = DATA_DIR / 'lstm_simulation_result.csv'
 DB_PATH = DATA_DIR / 'bess_data.db'
 
 print(f"\n[경로 정보]")
-print(f"  프로젝트 루트: {PROJECT_ROOT}")
+print(f"  앱 디렉토리: {APP_DIR}")
 print(f"  데이터 폴더: {DATA_DIR}")
 print(f"  CSV 파일: {CSV_PATH}")
 print(f"  CSV 존재: {CSV_PATH.exists()}")
 print(f"  DB 파일: {DB_PATH}\n")
 
 # Flask 설정
-app = Flask(__name__, template_folder=str(PROJECT_ROOT / 'templates'))
+app = Flask(__name__, template_folder=str(APP_DIR / 'templates'))
 # [§8] 하드코딩 제거 — 환경변수 우선, 로컬 개발용 임시값 fallback
 app.config['SECRET_KEY'] = os.environ.get('BESS_SECRET_KEY', 'dev-only-change-me')
 

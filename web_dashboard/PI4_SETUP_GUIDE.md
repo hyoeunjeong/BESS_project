@@ -40,6 +40,8 @@ Bess_Project/
     └── dashboard.html         # ← UI 파일
 ```
 
+> 위 구조는 Pi4 배포용 평면 레이아웃이며, 저장소 구조(`web_dashboard/`)와 다르다. 배포 시 파일을 평면으로 복사한다.
+
 ## 3단계: 웹 라이브러리 설치
 
 ```bash

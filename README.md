@@ -275,7 +275,8 @@ BESS_project/
 └── web_dashboard/              # Flask 모니터링 대시보드
     ├── web_app.py              #   배치 결과 대시보드 (localhost:5000)
     ├── web_app_realtime.py     #   실시간 엔진 연동
-    └── realtime_engine.py
+    ├── realtime_engine.py
+    └── templates/dashboard.html #  대시보드 UI (web_app 이 참조하는 유일 템플릿)
 ```
 
 > 논문 표·그림·근거 CSV(`results/*.csv`, `figures/*.png`)는 **저장소에 포함**된다. 대용량 중간 산출물
